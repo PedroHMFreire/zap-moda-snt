@@ -1,14 +1,15 @@
 import 'dotenv/config'
 import express from 'express'
 import pino from 'pino'
-import { startSender } from './sender.ts'
-import { startHealth } from './health.ts'
+import { startSender } from './sender'
+import { startHealth } from './health'
 import PgBoss from 'pg-boss'
 import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys'
-import { postInbound } from './inbound.ts'
+import { postInbound } from './inbound'
 import { createClient } from '@supabase/supabase-js'
-import { downloadAuthDirFromStorage, uploadAuthDirToStorage, ensureLocalAuthDir } from './sessionStore.ts'
-import { setSocket, removeSocket } from './socketRegistry.ts'
+import { downloadAuthDirFromStorage, uploadAuthDirToStorage, ensureLocalAuthDir } from './sessionStore'
+import { setSocket, removeSocket } from './socketRegistry'
+import { normalizePhone } from '../../../app/lib/phone'
 
 const app = express()
 app.use(express.json())
@@ -74,10 +75,12 @@ async function startSessionWorker() {
 
     sock.ev.on('messages.upsert', async (m) => {
       for (const msg of m.messages) {
-        const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text
-  const from = (msg.key.remoteJid?.split('@')[0] || '').replace(/[^0-9]/g, '')
-        if (!text || !from) continue
-        await postInbound({ store_id, from, text })
+    const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text
+    const rawFrom = (msg.key.remoteJid?.split('@')[0] || '')
+    const cleanedDigits = rawFrom.replace(/[^0-9]/g, '')
+    const from = normalizePhone(cleanedDigits)
+    if (!text || !from) continue
+    await postInbound({ store_id, from, text })
       }
     })
   })

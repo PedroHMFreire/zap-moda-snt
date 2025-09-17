@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 export const sendSchema = z.object({
   session_id: z.string().uuid(),
-  to: z.string().min(6),
+  to: z.string().min(6).max(30),
   text: z.string().min(1).max(1000).optional(),
   media_url: z.string().url().optional(),
   store_id: z.string().uuid(),

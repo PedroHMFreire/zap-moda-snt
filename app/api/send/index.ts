@@ -3,6 +3,7 @@ import { sendSchema } from '../../lib/validators'
 import { requireAuth, assertStoreOwnership } from '../../lib/auth'
 import { enqueueSend } from '../../lib/queue'
 import { supabaseService } from '../../lib/supabaseClient'
+import { normalizePhone, isValidPhone } from '../../lib/phone'
 
 const app = express()
 app.use(express.json())
@@ -29,15 +30,14 @@ app.post('*', requireAuth(), async (req, res) => {
     status: 'queued'
   }).select('id').single()
   if (error) return res.status(500).json({ error: error.message })
-  if (!payload.to) {
-    return res.status(400).json({ error: "'to' field is required" })
-  }
-  await enqueueSend({ 
-    ...payload, 
-    message_id: msg.id, 
-    session_id: payload.session_id ?? '', 
-    to: payload.to, 
-    store_id: payload.store_id // ensure store_id is always present
+  const normTo = normalizePhone(payload.to)
+  if (!isValidPhone(normTo)) return res.status(400).json({ error: 'invalid phone number' })
+  await enqueueSend({
+    ...payload,
+    message_id: msg.id,
+    session_id: payload.session_id,
+    to: normTo,
+    store_id: payload.store_id
   })
   return res.json({ ok: true, message_id: msg.id })
 })
