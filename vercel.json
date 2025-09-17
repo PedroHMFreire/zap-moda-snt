@@ -1,25 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "version": 2,
-  "env": {
-    "SUPABASE_URL": "",
-    "SUPABASE_ANON_KEY": "",
-    "SUPABASE_SERVICE_ROLE": "",
-    "OPENAI_API_KEY": "",
-    "QUEUE_DB_URL": "",
-    "INTERNAL_WEBHOOK_TOKEN": "",
-    "SESSION_STORAGE_BUCKET": ""
-  },
-  "functions": {
-    "app/api/**/index.ts": {
-      "runtime": "nodejs18.x",
-      "maxDuration": 30,
-      "memory": 1024
-    }
-  },
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/app/api/$1/index.ts" },
-    { "src": "/(.*)", "dest": "/app/web/index.html" }
-  ],
-  "installCommand": "npm --prefix app install"
+  "version": 2
 }
