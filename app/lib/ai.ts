@@ -34,6 +34,7 @@ export async function generateReply(input: AiInput): Promise<string> {
   const safetyFallback = 'No momento não consigo responder com segurança. Posso verificar e te retorno em instantes?'
 
   try {
+    const start = Date.now()
     const toolContext = `Produtos relevantes (máx 5):\n${(input.products||[]).map(p=>`- ${p.name} — R$ ${p.price.toFixed(2)}`).join('\n')}`
     const userWithContext = [
       { role: 'system' as const, content: SYSTEM_PROMPT },
@@ -49,6 +50,8 @@ export async function generateReply(input: AiInput): Promise<string> {
       messages: userWithContext
     })
     const text = resp.choices?.[0]?.message?.content?.trim()
+    const dur = Date.now() - start
+    logger.info({ dur_ms: dur, model: 'gpt-4o-mini', tokens_est: resp.usage?.total_tokens }, 'ai.generateReply.duration')
     return text || safetyFallback
   } catch (e:any) {
     logger.error({ err: e }, 'AI generateReply failed')

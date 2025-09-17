@@ -4,8 +4,10 @@ import { inboundSchema } from '../../lib/validators'
 import { verifyInternalSignature } from '../../lib/auth'
 import { upsertContactByPhone, getOrCreateConversation, insertMessage } from '../../lib/db'
 import { enqueueAi } from '../../lib/queue'
+import { requestLogger } from '../../lib/logger'
 
 const app = express()
+app.use(requestLogger())
 app.use(express.json())
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' })
 
@@ -27,7 +29,7 @@ app.post('*', async (req, res) => {
       media_url: media_url || null,
       status: 'received'
     })
-    await enqueueAi({ store_id, conversation_id: conv.id })
+  await enqueueAi({ store_id, conversation_id: conv.id, request_id: (req as any).request_id })
     return res.json({ ok: true, message_id: msg.id })
   } catch (e:any) {
     logger.error({ err: e }, 'inbound failed')

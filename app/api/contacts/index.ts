@@ -1,8 +1,10 @@
 import express from 'express'
 import { requireAuth, assertStoreOwnership } from '../../lib/auth'
 import { supabaseService } from '../../lib/supabaseClient'
+import { requestLogger } from '../../lib/logger'
 
 const app = express()
+app.use(requestLogger())
 app.use(express.json())
 
 app.get('*', requireAuth(), async (req, res) => {

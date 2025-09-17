@@ -1,4 +1,5 @@
 import { supabaseService } from './supabaseClient'
+import { cache } from './cache'
 
 export type MessageInput = {
   store_id: string
@@ -56,13 +57,16 @@ export async function fetchConversationContext(conversation_id: string, limit = 
 }
 
 export async function searchProducts(store_id: string, query: string, limit = 5) {
-  const sb = supabaseService()
-  const { data, error } = await sb
-    .from('products')
-    .select('id, name, price, category, description, images')
-    .ilike('name', `%${query}%`)
-    .eq('store_id', store_id)
-    .limit(limit)
-  if (error) throw error
-  return data ?? []
+  const key = `prodsearch:${store_id}:${query}:${limit}`
+  return cache.wrap(key, Number(process.env.CACHE_PRODUCT_SEARCH_TTL_MS || 30000), async () => {
+    const sb = supabaseService()
+    const { data, error } = await sb
+      .from('products')
+      .select('id, name, price, category, description, images')
+      .ilike('name', `%${query}%`)
+      .eq('store_id', store_id)
+      .limit(limit)
+    if (error) throw error
+    return data ?? []
+  })
 }

@@ -54,8 +54,8 @@ create table if not exists messages (
   conversation_id uuid references conversations(id) on delete cascade,
   store_id uuid not null,
   contact_id uuid,
-  direction text check (direction in ('in','out')),
-  type text,
+  direction text check (direction in ('in','out')) not null,
+  type text default 'text',
   content text,
   media_url text,
   status text,
@@ -76,9 +76,15 @@ create table if not exists products (
 
 -- Indexes
 create index if not exists idx_messages_conversation_created_desc on messages(conversation_id, created_at desc);
+create index if not exists idx_messages_store_created_desc on messages(store_id, created_at desc);
+create index if not exists idx_messages_contact_created_desc on messages(contact_id, created_at desc);
 create index if not exists idx_contacts_store_phone on contacts(store_id, phone);
 create index if not exists idx_products_store_name on products(store_id, name);
 create index if not exists idx_conversations_store_lastmsg_desc on conversations(store_id, last_message_at desc);
+create index if not exists idx_conversations_contact_lastmsg_desc on conversations(contact_id, last_message_at desc);
+create index if not exists idx_whatsapp_sessions_store_status on whatsapp_sessions(store_id, status);
+create unique index if not exists ux_contacts_store_phone_notnull on contacts(store_id, phone) where phone is not null;
+create unique index if not exists ux_products_store_name on products(store_id, name);
 
 -- Row Level Security
 alter table stores enable row level security;
@@ -89,40 +95,71 @@ alter table conversations enable row level security;
 alter table messages enable row level security;
 alter table products enable row level security;
 
--- Policies: owners access by store_id
-create policy if not exists stores_owner_policy on stores
+-- Policies: owners access by store_id (Postgres não suporta 'create policy if not exists')
+drop policy if exists stores_owner_policy on stores;
+create policy stores_owner_policy on stores
   for all to authenticated
   using (owner_id = auth.uid())
   with check (owner_id = auth.uid());
 
-create policy if not exists whatsapp_configs_owner_policy on whatsapp_configs
+drop policy if exists whatsapp_configs_owner_policy on whatsapp_configs;
+create policy whatsapp_configs_owner_policy on whatsapp_configs
   for all to authenticated
   using (store_id in (select id from stores where owner_id = auth.uid()))
   with check (store_id in (select id from stores where owner_id = auth.uid()));
 
-create policy if not exists whatsapp_sessions_owner_policy on whatsapp_sessions
-  for select, update, delete to authenticated
+-- whatsapp_sessions: separar policies (Postgres não aceita listar várias ações em uma só)
+drop policy if exists whatsapp_sessions_owner_policy on whatsapp_sessions; -- legado se chegou a ser criada
+drop policy if exists whatsapp_sessions_owner_policy_select on whatsapp_sessions;
+drop policy if exists whatsapp_sessions_owner_policy_update on whatsapp_sessions;
+drop policy if exists whatsapp_sessions_owner_policy_delete on whatsapp_sessions;
+
+create policy whatsapp_sessions_owner_policy_select on whatsapp_sessions
+  for select to authenticated
   using (store_id in (select id from stores where owner_id = auth.uid()));
 
-create policy if not exists contacts_owner_policy on contacts
+create policy whatsapp_sessions_owner_policy_update on whatsapp_sessions
+  for update to authenticated
+  using (store_id in (select id from stores where owner_id = auth.uid()));
+
+create policy whatsapp_sessions_owner_policy_delete on whatsapp_sessions
+  for delete to authenticated
+  using (store_id in (select id from stores where owner_id = auth.uid()));
+
+drop policy if exists contacts_owner_policy on contacts;
+create policy contacts_owner_policy on contacts
   for all to authenticated
   using (store_id in (select id from stores where owner_id = auth.uid()))
   with check (store_id in (select id from stores where owner_id = auth.uid()));
 
-create policy if not exists conversations_owner_policy on conversations
+drop policy if exists conversations_owner_policy on conversations;
+create policy conversations_owner_policy on conversations
   for all to authenticated
   using (store_id in (select id from stores where owner_id = auth.uid()))
   with check (store_id in (select id from stores where owner_id = auth.uid()));
 
-create policy if not exists messages_owner_policy on messages
+drop policy if exists messages_owner_policy on messages;
+create policy messages_owner_policy on messages
   for all to authenticated
   using (store_id in (select id from stores where owner_id = auth.uid()))
   with check (store_id in (select id from stores where owner_id = auth.uid()));
 
-create policy if not exists products_owner_policy on products
+drop policy if exists products_owner_policy on products;
+create policy products_owner_policy on products
   for all to authenticated
   using (store_id in (select id from stores where owner_id = auth.uid()))
   with check (store_id in (select id from stores where owner_id = auth.uid()));
+
+-- Trigger to maintain updated_at on whatsapp_sessions
+create or replace function touch_whatsapp_sessions_updated_at() returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end; $$ language plpgsql;
+
+create trigger whatsapp_sessions_updated_at
+  before update on whatsapp_sessions
+  for each row execute procedure touch_whatsapp_sessions_updated_at();
 
 -- Optional seed
 insert into stores (id, owner_id, name, description)

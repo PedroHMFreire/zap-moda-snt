@@ -48,7 +48,7 @@ export async function startSender() {
   // In production, prefer consolidating send logic in one process where sockets live.
 
   await boss.work('send-message', async (job: any) => {
-  const { session_id, to, text, media_url, conversation_id, store_id, message_id } = (job?.data as any) || {}
+  const { session_id, to, text, media_url, conversation_id, store_id, message_id, request_id } = (job?.data as any) || {}
     const sock = session_id ? getSocket(session_id) : undefined
     const jid = to.includes('@') ? to : `${to.replace(/[^0-9]/g, '')}@s.whatsapp.net`
     try {
@@ -78,17 +78,17 @@ export async function startSender() {
         throw new Error('no payload to send')
       }
       if (!message_id) {
-        logger.warn({ jobId: job.id }, 'missing message_id - skipping status update to avoid broad update')
+        logger.warn({ jobId: job.id, rid: request_id }, 'missing message_id - skipping status update to avoid broad update')
       } else {
         await supabase.from('messages').update({ status: 'sent' }).eq('id', message_id)
       }
       return true
     } catch (e: any) {
-      logger.error({ err: e, to }, 'send failed')
+      logger.error({ err: e, to, rid: request_id }, 'send failed')
       // Simple retry by requeueing with delay
       try { await boss.publish('send-message', job.data, { retryLimit: 3, retryDelay: 5000 }) } catch {}
       if (!message_id) {
-        logger.warn({ jobId: job.id }, 'missing message_id on failure - not updating ambiguous rows')
+        logger.warn({ jobId: job.id, rid: request_id }, 'missing message_id on failure - not updating ambiguous rows')
       } else {
         await supabase.from('messages').update({ status: 'failed' }).eq('id', message_id)
       }

@@ -1,8 +1,9 @@
 node_modules/
 
-# Env files
+# Env files (manter apenas arquivo de exemplo)
 .env*
-!.env.local.example
+!.env.example
+!.env.local.example  # se quiser manter este nome também, mas preferir só .env.example
 
 # Vercel
 .vercel/

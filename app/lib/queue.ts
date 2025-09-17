@@ -16,15 +16,7 @@ export const QUEUE_START_SESSION = 'start-session'
 
 export async function ensureBoss() {
   const b = getBoss()
-  if (!(await b.getQueue(QUEUE_SEND))) {
-    await b.createQueue(QUEUE_SEND)
-  }
-  if (!(await b.getQueue(QUEUE_AI_REPLY))) {
-    await b.createQueue(QUEUE_AI_REPLY)
-  }
-  if (!(await b.getQueue(QUEUE_START_SESSION))) {
-    await b.createQueue(QUEUE_START_SESSION)
-  }
+  // PgBoss automatically creates queues when you publish jobs, so explicit creation is not needed.
   if (!b['__started']) {
     await b.start()
     ;(b as any)['__started'] = true
@@ -41,6 +33,7 @@ export type SendJob = {
   conversation_id?: string
   contact_id?: string
   message_id?: string
+  request_id?: string
 }
 
 export async function enqueueSend(job: SendJob) {
@@ -51,6 +44,7 @@ export async function enqueueSend(job: SendJob) {
 export type AiReplyJob = {
   store_id: string
   conversation_id: string
+  request_id?: string
 }
 
 export async function enqueueAi(job: AiReplyJob) {
@@ -61,6 +55,7 @@ export async function enqueueAi(job: AiReplyJob) {
 export type StartSessionJob = {
   store_id: string
   session_id: string
+  request_id?: string
 }
 
 export async function enqueueStartSession(job: StartSessionJob) {
