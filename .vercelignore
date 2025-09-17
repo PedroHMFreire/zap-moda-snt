@@ -1,0 +1,4 @@
+# Ignore worker and root-only files for the app deployment
+workers/
+README.md
+supabase_schema.sql
