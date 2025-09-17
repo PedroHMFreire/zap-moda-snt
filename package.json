@@ -1,0 +1,25 @@
+{
+  "name": "zap-moda-snt",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "app",
+    "workers/session-node"
+  ],
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "devDependencies": {
+    "vercel": "^33.7.0"
+  },
+  "scripts": {
+    "install:all": "npm --prefix app install && npm --prefix workers/session-node install",
+    "dev:api": "vercel dev",
+    "dev:worker": "npm --prefix workers/session-node run dev",
+    "dev": "concurrently \"vercel dev\" \"npm --prefix workers/session-node run dev\"",
+    "postinstall": "echo done",
+    "lint": "echo 'No lint configured'",
+    "format": "echo 'No format configured'"
+  }
+}

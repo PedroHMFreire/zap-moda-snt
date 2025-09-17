@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Santê Operador</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // Load Supabase client dynamically
+      window.addEventListener('DOMContentLoaded', async () => {
+        const cfg = await fetch('/api/config').then(r=>r.json())
+        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2')
+        const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey)
+        window.supabase = supabase
+
+        async function requireLogin() {
+          const { data } = await supabase.auth.getUser()
+          if (!data?.user) {
+            const email = prompt('Digite seu e-mail para login magic link:')
+            if (email) {
+              await supabase.auth.signInWithOtp({ email })
+              alert('Enviamos um link para seu e-mail. Após abrir, recarregue a página.')
+            }
+          }
+        }
+        requireLogin()
+
+        async function tryInit() {
+          const session = (await supabase.auth.getSession()).data.session
+          if (session && window.initApp) window.initApp()
+        }
+        tryInit()
+        supabase.auth.onAuthStateChange((_event, session) => {
+          if (session && window.initApp) window.initApp()
+        })
+      })
+    </script>
+  </head>
+  <body class="h-screen w-screen bg-gray-50 text-gray-900">
+    <div class="flex h-full">
+      <!-- Conversas -->
+      <aside class="w-1/4 border-r bg-white flex flex-col">
+        <div class="p-3 border-b space-y-2">
+          <select id="store-select" class="w-full border rounded px-3 py-2"></select>
+          <input id="search" class="w-full border rounded px-3 py-2" placeholder="Buscar conversas" />
+        </div>
+        <div id="conversations" class="flex-1 overflow-auto">
+          <!-- placeholder -->
+          <div class="p-3 text-sm text-gray-500">Selecione uma loja para ver conversas.</div>
+        </div>
+      </aside>
+
+      <!-- Mensagens -->
+      <main class="flex-1 flex flex-col">
+        <header class="p-3 border-b bg-white flex items-center gap-3">
+          <span id="conv-title">Conversa</span>
+          <button id="connect" class="ml-auto border px-3 py-1 rounded">Conectar WhatsApp</button>
+          <button id="disconnect" class="border px-3 py-1 rounded">Desconectar</button>
+        </header>
+        <div id="messages" class="flex-1 overflow-auto p-4 space-y-2">
+          <div class="text-sm text-gray-500">Selecione uma conversa para carregar as mensagens.</div>
+        </div>
+        <form id="send-form" class="p-3 border-t bg-white flex gap-2">
+          <input id="to" class="w-48 border rounded px-3 py-2" placeholder="Destinatário (ex: 55999999999)" />
+          <input id="msg" class="flex-1 border rounded px-3 py-2" placeholder="Digite uma mensagem" />
+          <button class="bg-emerald-600 text-white px-4 py-2 rounded">Enviar</button>
+        </form>
+      </main>
+
+      <!-- Catálogo -->
+      <aside class="w-1/4 border-l bg-white flex flex-col">
+        <div class="p-3 border-b flex justify-between items-center">
+          <span>Catálogo</span>
+          <a class="text-sm text-emerald-700 underline" href="/config.html">Configurações</a>
+        </div>
+        <div class="p-3 flex gap-2">
+          <input class="flex-1 border rounded px-3 py-2" placeholder="Buscar produtos" />
+          <button class="border px-3 rounded">Buscar</button>
+        </div>
+        <div id="products" class="flex-1 overflow-auto p-3 space-y-2">
+          <div class="border rounded p-2">
+            <div class="font-medium">Short praiano M</div>
+            <div class="text-sm text-gray-600">R$ 149,90</div>
+            <button class="mt-1 text-sm text-emerald-700 underline">Inserir na resposta</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <script>
+      let currentSessionId = null
+      let currentStoreId = null
+      let currentTo = null
+      let currentConversationId = null
+      let refreshTimer = null
+
+      async function api(path, opts) {
+        const cfg = await fetch('/api/config').then(r=>r.json())
+        const token = (await window.supabase.auth.getSession()).data.session?.access_token
+        const headers = { 'content-type': 'application/json' }
+        if (token) headers['authorization'] = 'Bearer ' + token
+        return fetch('/api' + path, { ...opts, headers })
+      }
+
+      window.initApp = async function initApp() {
+        await loadStores()
+      }
+
+      async function loadStores() {
+        const { data, error } = await window.supabase.from('stores').select('id, name').order('name')
+        const sel = document.getElementById('store-select')
+        sel.innerHTML = ''
+        if (error) {
+          sel.innerHTML = `<option>Erro ao carregar lojas</option>`
+          return
+        }
+        if (!data || data.length === 0) {
+          sel.innerHTML = `<option>Nenhuma loja</option>`
+          return
+        }
+        sel.innerHTML = data.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')
+        currentStoreId = data[0].id
+        sel.value = currentStoreId
+        sel.onchange = () => { currentStoreId = sel.value; loadConversations(); loadProducts(); }
+        await loadConversations()
+        await loadProducts()
+      }
+
+      async function loadConversations() {
+        const list = document.getElementById('conversations')
+        list.innerHTML = '<div class="p-3 text-sm text-gray-500">Carregando…</div>'
+        const { data, error } = await window.supabase
+          .from('conversations')
+          .select('id, last_message_at, contact_id, contacts:contact_id ( name, phone )')
+          .eq('store_id', currentStoreId)
+          .order('last_message_at', { ascending: false })
+        if (error) {
+          list.innerHTML = `<div class="p-3 text-sm text-red-600">Erro: ${error.message}</div>`
+          return
+        }
+        if (!data || data.length === 0) {
+          list.innerHTML = '<div class="p-3 text-sm text-gray-500">Sem conversas ainda.</div>'
+          return
+        }
+        list.innerHTML = ''
+        data.forEach(c => {
+          const el = document.createElement('div')
+          el.className = 'p-3 hover:bg-gray-100 cursor-pointer border-b'
+          const name = c.contacts?.name || c.contacts?.phone || 'Sem nome'
+          const when = c.last_message_at ? new Date(c.last_message_at).toLocaleString() : '-'
+          el.innerHTML = `<div class="flex justify-between"><span>${name}</span><span class="text-xs text-gray-500">${when}</span></div>`
+          el.addEventListener('click', () => selectConversation(c))
+          list.appendChild(el)
+        })
+      }
+
+      async function selectConversation(conv) {
+        currentConversationId = conv.id
+        currentTo = (conv.contacts && conv.contacts.phone) || null
+        document.getElementById('to').value = currentTo || ''
+        document.getElementById('conv-title').textContent = conv.contacts?.name || conv.contacts?.phone || 'Conversa'
+        await loadMessages()
+        if (refreshTimer) clearInterval(refreshTimer)
+        refreshTimer = setInterval(loadMessages, 4000)
+      }
+
+      async function loadMessages() {
+        const box = document.getElementById('messages')
+        if (!currentConversationId) return
+        const { data, error } = await window.supabase
+          .from('messages')
+          .select('id, direction, type, content, media_url, created_at')
+          .eq('conversation_id', currentConversationId)
+          .order('created_at', { ascending: true })
+        if (error) {
+          box.innerHTML = `<div class="p-3 text-sm text-red-600">Erro: ${error.message}</div>`
+          return
+        }
+        box.innerHTML = ''
+        data.forEach(m => {
+          const div = document.createElement('div')
+          const mine = m.direction === 'out'
+          div.className = 'max-w-md border rounded p-2 ' + (mine ? 'bg-emerald-50 border-emerald-200 self-end ml-auto' : 'bg-white')
+          if (m.type === 'text' || !m.type) {
+            div.textContent = m.content || ''
+          } else if (m.type === 'image' && m.media_url) {
+            const img = document.createElement('img'); img.src = m.media_url; img.className = 'max-w-xs rounded'; div.appendChild(img)
+            if (m.content) { const p = document.createElement('div'); p.textContent = m.content; div.appendChild(p) }
+          } else {
+            div.textContent = m.content || '[mensagem]'
+          }
+          box.appendChild(div)
+        })
+        box.scrollTop = box.scrollHeight
+      }
+
+      async function loadProducts() {
+        const grid = document.getElementById('products')
+        if (!currentStoreId) return
+        const { data, error } = await window.supabase
+          .from('products')
+          .select('id, name, price, description')
+          .eq('store_id', currentStoreId)
+          .order('created_at', { ascending: false })
+        if (error) {
+          grid.innerHTML = `<div class="p-3 text-sm text-red-600">Erro: ${error.message}</div>`
+          return
+        }
+        grid.innerHTML = ''
+        data.forEach(p => {
+          const el = document.createElement('div')
+          el.className = 'border rounded p-2'
+          el.innerHTML = `<div class="font-medium">${p.name}</div><div class="text-sm text-gray-600">R$ ${Number(p.price).toFixed(2)}</div>`
+          const btn = document.createElement('button')
+          btn.className = 'mt-1 text-sm text-emerald-700 underline'
+          btn.textContent = 'Inserir na resposta'
+          btn.addEventListener('click', () => {
+            const input = document.getElementById('msg')
+            input.value = (input.value ? input.value + ' ' : '') + `${p.name} por R$ ${Number(p.price).toFixed(2)}`
+            input.focus()
+          })
+          el.appendChild(btn)
+          grid.appendChild(el)
+        })
+      }
+
+      document.getElementById('send-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const input = document.getElementById('msg');
+        const toInput = document.getElementById('to');
+        if (!input || !input.value) return;
+        currentTo = toInput?.value || currentTo
+        if (!currentSessionId || !currentStoreId || !currentTo) {
+          alert('Configure sessão, loja e destinatário.');
+          return;
+        }
+        await api('/send', { method: 'POST', body: JSON.stringify({
+          session_id: currentSessionId,
+          store_id: currentStoreId,
+          to: currentTo,
+          text: input.value
+        }) })
+        const div = document.createElement('div');
+        div.className = 'max-w-md bg-emerald-50 border border-emerald-200 rounded p-2 self-end ml-auto';
+        div.textContent = input.value;
+        document.getElementById('messages')?.appendChild(div);
+        input.value = '';
+        // Refresh messages after short delay
+        setTimeout(loadMessages, 1000)
+      });
+
+      document.getElementById('connect')?.addEventListener('click', async () => {
+        if (!currentStoreId) { alert('Selecione uma loja primeiro.'); return }
+        const r = await api('/sessions/create', { method: 'POST', body: JSON.stringify({ store_id: currentStoreId }) })
+        const j = await r.json()
+        currentSessionId = j.session_id
+        // Abrir SSE do QR
+        const es = new EventSource(`/api/sessions/qr?session_id=${currentSessionId}`)
+        es.addEventListener('qr', (ev) => {
+          const data = JSON.parse(ev.data)
+          const img = document.getElementById('qr') || (()=>{ const i=document.createElement('img'); i.id='qr'; i.className='absolute top-3 right-3 w-64 border'; document.body.appendChild(i); return i })()
+          img.src = `data:image/png;base64,${data.qr_base64}`
+        })
+        es.addEventListener('connected', () => {
+          const img = document.getElementById('qr'); if (img) img.remove()
+          alert('Sessão conectada!')
+        })
+      })
+
+      document.getElementById('disconnect')?.addEventListener('click', async () => {
+        if (!currentSessionId) return
+        await api('/sessions/disconnect', { method: 'POST', body: JSON.stringify({ session_id: currentSessionId }) })
+        alert('Sessão marcada como desconectada')
+      })
+    </script>
+  </body>
+  </html>

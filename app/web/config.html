@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Configurações da Loja</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-50 text-gray-900">
+    <div class="max-w-3xl mx-auto p-6 space-y-6">
+      <a href="/" class="text-emerald-700 underline">← Voltar</a>
+      <h1 class="text-2xl font-semibold">Configurações da Loja</h1>
+      <div class="space-y-4">
+        <div class="flex gap-2 items-center">
+          <select id="store-select" class="border rounded p-2 flex-1"></select>
+          <button id="new-store" class="border px-3 py-2 rounded">Nova loja</button>
+        </div>
+      </div>
+      <form id="cfg-form" class="space-y-4">
+        <div>
+          <label class="block text-sm">Horário comercial (JSON)</label>
+          <textarea id="business_hours" class="w-full border rounded p-2" rows="4">{"mon_fri":"09:00-18:00","sat":"10:00-14:00"}</textarea>
+        </div>
+        <div>
+          <label class="block text-sm">Mensagem de ausência</label>
+          <input id="away_message" class="w-full border rounded p-2" value="Estamos fora do horário. Podemos te responder depois?" />
+        </div>
+        <div>
+          <label class="block text-sm">Limite por minuto</label>
+          <input id="rate_limit" class="w-40 border rounded p-2" type="number" value="20" />
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" class="bg-emerald-600 text-white px-4 py-2 rounded">Salvar</button>
+          <button id="connect" class="border px-4 py-2 rounded" type="button">Conectar WhatsApp</button>
+        </div>
+      </form>
+    </div>
+    <script type="module">
+      const cfg = await fetch('/api/config').then(r=>r.json())
+      const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2')
+      const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey)
+
+      async function requireLogin() {
+        const { data } = await supabase.auth.getUser()
+        if (!data?.user) {
+          const email = prompt('Digite seu e-mail para login magic link:')
+          if (email) {
+            await supabase.auth.signInWithOtp({ email })
+            alert('Enviamos um link para seu e-mail. Após abrir, recarregue a página.')
+          }
+        }
+      }
+      await requireLogin()
+
+      const sel = document.getElementById('store-select')
+      const form = document.getElementById('cfg-form')
+      const rate = document.getElementById('rate_limit')
+      const away = document.getElementById('away_message')
+      const hours = document.getElementById('business_hours')
+
+      async function api(path, opts) {
+        const token = (await supabase.auth.getSession()).data.session?.access_token
+        const headers = { 'content-type': 'application/json' }
+        if (token) headers['authorization'] = 'Bearer ' + token
+        return fetch('/api' + path, { ...opts, headers })
+      }
+
+      async function loadStores() {
+        const r = await api('/stores', { method: 'GET' })
+        const list = await r.json()
+        sel.innerHTML = ''
+        if (!Array.isArray(list) || list.length === 0) {
+          sel.innerHTML = '<option value="">Nenhuma loja</option>'
+          return
+        }
+        sel.innerHTML = list.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')
+        await loadSelected()
+      }
+
+      async function loadSelected() {
+        const id = sel.value
+        if (!id) return
+        const r = await api(`/stores?store_id=${id}`, { method: 'GET' })
+        const data = await r.json()
+        const cfg = data?.whatsapp_configs || {}
+        rate.value = cfg.rate_limit_per_min ?? 20
+        away.value = data?.away_message || ''
+        hours.value = JSON.stringify(data?.business_hours || { mon_fri: '09:00-18:00', sat: '10:00-14:00' })
+      }
+
+      sel.addEventListener('change', loadSelected)
+
+      document.getElementById('new-store').addEventListener('click', async (e) => {
+        e.preventDefault()
+        const name = prompt('Nome da nova loja:')
+        if (!name) return
+        const r = await api('/stores', { method: 'POST', body: JSON.stringify({ store: { name } }) })
+        const j = await r.json()
+        await loadStores()
+        sel.value = j.store_id
+        await loadSelected()
+      })
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault()
+        const id = sel.value
+        if (!id) return alert('Selecione uma loja')
+  let bh = {}
+        try { bh = JSON.parse(hours.value || '{}') } catch {}
+        await api('/stores', { method: 'POST', body: JSON.stringify({
+          store: { id, business_hours: bh, away_message: away.value },
+          config: { store_id: id, rate_limit_per_min: Number(rate.value) }
+        }) })
+        alert('Configurações salvas!')
+      })
+
+      document.getElementById('connect').addEventListener('click', async () => {
+        const id = sel.value
+        if (!id) return alert('Selecione uma loja')
+        const r = await api('/sessions/create', { method: 'POST', body: JSON.stringify({ store_id: id }) })
+        const j = await r.json()
+        const es = new EventSource(`/api/sessions/qr?session_id=${j.session_id}`)
+        es.addEventListener('qr', (ev) => {
+          const data = JSON.parse(ev.data)
+          const img = document.getElementById('qr') || (()=>{ const i=document.createElement('img'); i.id='qr'; i.className='fixed bottom-3 right-3 w-64 border bg-white'; document.body.appendChild(i); return i })()
+          img.src = `data:image/png;base64,${data.qr_base64}`
+        })
+        es.addEventListener('connected', () => {
+          const img = document.getElementById('qr'); if (img) img.remove()
+          alert('Sessão conectada!')
+          es.close()
+        })
+      })
+
+      await loadStores()
+    </script>
+  </body>
+  </html>
