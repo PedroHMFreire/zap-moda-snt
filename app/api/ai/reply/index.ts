@@ -3,13 +3,19 @@ import { fetchConversationContext, searchProducts } from '../../../lib/db'
 import { generateReply } from '../../../lib/ai'
 import { enqueueSend } from '../../../lib/queue'
 import { supabaseService } from '../../../lib/supabaseClient'
+import { requireAuth, assertStoreOwnership } from '../../../lib/auth'
 
 const app = express()
 app.use(express.json())
 
-app.post('*', async (req, res) => {
+app.post('*', requireAuth(), async (req, res) => {
   const { store_id, conversation_id, session_id, to } = req.body || {}
   if (!store_id || !conversation_id) return res.status(400).json({ error: 'store_id and conversation_id required' })
+  try {
+    await assertStoreOwnership((req as any).user.id, store_id)
+  } catch {
+    return res.status(403).json({ error: 'forbidden' })
+  }
 
   const sb = supabaseService()
   const { data: store } = await sb.from('stores').select('away_message').eq('id', store_id).maybeSingle()

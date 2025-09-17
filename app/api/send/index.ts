@@ -1,6 +1,6 @@
 import express from 'express'
 import { sendSchema } from '../../lib/validators'
-import { requireAuth } from '../../lib/auth'
+import { requireAuth, assertStoreOwnership } from '../../lib/auth'
 import { enqueueSend } from '../../lib/queue'
 import { supabaseService } from '../../lib/supabaseClient'
 
@@ -11,6 +11,11 @@ app.post('*', requireAuth(), async (req, res) => {
   const parse = sendSchema.safeParse(req.body)
   if (!parse.success) return res.status(400).json({ error: parse.error.flatten() })
   const payload = parse.data
+  try {
+    await assertStoreOwnership((req as any).user.id, payload.store_id)
+  } catch {
+    return res.status(403).json({ error: 'forbidden' })
+  }
   // create message row now (single writer) to track status
   const sb = supabaseService()
   const { data: msg, error } = await sb.from('messages').insert({
@@ -24,7 +29,16 @@ app.post('*', requireAuth(), async (req, res) => {
     status: 'queued'
   }).select('id').single()
   if (error) return res.status(500).json({ error: error.message })
-  await enqueueSend({ ...payload, message_id: msg.id })
+  if (!payload.to) {
+    return res.status(400).json({ error: "'to' field is required" })
+  }
+  await enqueueSend({ 
+    ...payload, 
+    message_id: msg.id, 
+    session_id: payload.session_id ?? '', 
+    to: payload.to, 
+    store_id: payload.store_id // ensure store_id is always present
+  })
   return res.json({ ok: true, message_id: msg.id })
 })
 

@@ -1,6 +1,6 @@
 import express from 'express'
 import { z } from 'zod'
-import { requireAuth } from '../../../lib/auth'
+import { requireAuth, assertStoreOwnership } from '../../../lib/auth'
 import { supabaseService } from '../../../lib/supabaseClient'
 import { enqueueStartSession } from '../../../lib/queue'
 
@@ -13,6 +13,11 @@ app.post('*', requireAuth(), async (req, res) => {
   const parse = bodySchema.safeParse(req.body)
   if (!parse.success) return res.status(400).json({ error: parse.error.flatten() })
   const { store_id } = parse.data
+  try {
+    await assertStoreOwnership((req as any).user.id, store_id)
+  } catch {
+    return res.status(403).json({ error: 'forbidden' })
+  }
   const sb = supabaseService()
   // Ensure a session row exists (status pending)
   const { data: session, error } = await sb
