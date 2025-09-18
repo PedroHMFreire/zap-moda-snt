@@ -1,64 +1,46 @@
-import PgBoss from 'pg-boss'
+// app/lib/queue.ts
+import PgBoss from 'pg-boss';
 
-let boss: PgBoss | null = null
+let boss: PgBoss | null = null;
+let bossReady: Promise<PgBoss> | null = null;
 
-export function getBoss() {
-  if (boss) return boss
-  const db = process.env.QUEUE_DB_URL
-  if (!db) throw new Error('QUEUE_DB_URL not set')
-  boss = new PgBoss({ connectionString: db, application_name: 'zap-moda-snt' })
-  return boss
-}
+async function getBoss(): Promise<PgBoss> {
+  if (boss) return boss;
+  if (!bossReady) {
+    const connectionString = process.env.QUEUE_DB_URL;
+    if (!connectionString) throw new Error('QUEUE_DB_URL não definida');
 
-export const QUEUE_SEND = 'send-message'
-export const QUEUE_AI_REPLY = 'ai-reply'
-export const QUEUE_START_SESSION = 'start-session'
-
-export async function ensureBoss() {
-  const b = getBoss()
-  // PgBoss automatically creates queues when you publish jobs, so explicit creation is not needed.
-  if (!b['__started']) {
-    await b.start()
-    ;(b as any)['__started'] = true
+    bossReady = (async () => {
+      const b = new PgBoss({
+        connectionString,
+        // schema: 'pgboss',
+        monitorStateIntervalMinutes: 10
+      });
+      b.on('error', (err) => {
+        console.error('[pg-boss] error', err);
+      });
+      await b.start();
+      boss = b;
+      return b;
+    })();
   }
-  return b
+  return bossReady;
 }
 
-export type SendJob = {
-  session_id: string
-  to: string
-  text?: string
-  media_url?: string
-  store_id: string
-  conversation_id?: string
-  contact_id?: string
-  message_id?: string
-  request_id?: string
+export type JobPayload = Record<string, unknown>;
+
+export async function publishJob(name: string, data: JobPayload) {
+  const b = await getBoss();
+  return b.publish(name, data as object);
 }
 
-export async function enqueueSend(job: SendJob) {
-  const b = await ensureBoss()
-  await b.publish(QUEUE_SEND, job)
-}
+export const enqueueSendMessage = (p: {
+  store_id: string; to: string; text?: string; media_url?: string;
+  conversation_id?: string; contact_id?: string; message_id?: string;
+}) => publishJob('send:message', p);
 
-export type AiReplyJob = {
-  store_id: string
-  conversation_id: string
-  request_id?: string
-}
+export const notifySessionStart = (p: { store_id: string; session_id: string }) =>
+  publishJob('session:start', p);
 
-export async function enqueueAi(job: AiReplyJob) {
-  const b = await ensureBoss()
-  await b.publish(QUEUE_AI_REPLY, job)
-}
-
-export type StartSessionJob = {
-  store_id: string
-  session_id: string
-  request_id?: string
-}
-
-export async function enqueueStartSession(job: StartSessionJob) {
-  const b = await ensureBoss()
-  await b.publish(QUEUE_START_SESSION, job)
-}
+export const notifySessionStop = (p: { store_id: string; session_id: string }) =>
+  publishJob('session:stop', p);

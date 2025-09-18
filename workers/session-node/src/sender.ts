@@ -1,98 +1,124 @@
-import 'dotenv/config'
-import PgBoss from 'pg-boss'
-import pino from 'pino'
-import fetch from 'node-fetch'
-import { createClient } from '@supabase/supabase-js'
-import { getSocket } from './socketRegistry'
-import { fileTypeFromBuffer } from 'file-type'
+// workers/session-node/src/sender.ts
+import type PgBoss from 'pg-boss';
+import type pino from 'pino';
+import { Pool } from 'pg';
+import { fileTypeFromBuffer } from 'file-type';
+import { fetch } from 'undici';
 
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' })
+type GetSocketFn = (storeId: string) => any | null;
 
-export async function startSender() {
-  const db = process.env.QUEUE_DB_URL
-  if (!db) {
-    logger.warn('QUEUE_DB_URL not set; sender disabled')
-    return
+type SendMessageJob = {
+  store_id: string;
+  to: string;
+  text?: string;
+  media_url?: string;
+  conversation_id?: string;
+  contact_id?: string;
+  message_id?: string;
+  request_id?: string;
+};
+
+// Rate limit por loja: janela deslizante de 60s
+const windowMs = 60_000;
+const sentTimestamps = new Map<string, number[]>(); // store_id -> timestamps (ms)
+
+async function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function getRateLimitPerMin(pool: Pool, store_id: string): Promise<number> {
+  try {
+    const r = await pool.query(
+      `select coalesce(w.rate_limit_per_min,20) as lim
+         from whatsapp_configs w where w.store_id=$1`,
+      [store_id],
+    );
+    return Number(r.rows?.[0]?.lim || 20);
+  } catch {
+    return 20;
   }
-  const boss = new PgBoss({ connectionString: db })
-  await boss.start()
+}
 
-  const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE!)
-
-  // Simple in-memory token bucket per store
-  const buckets = new Map<string, { tokens: number; lastRefill: number; rate: number }>()
-  async function allow(store_id?: string) {
-    if (!store_id) return true
-    const now = Date.now()
-    let b = buckets.get(store_id)
-    if (!b) {
-      const { data } = await supabase.from('whatsapp_configs').select('rate_limit_per_min').eq('store_id', store_id).maybeSingle()
-      const rate = data?.rate_limit_per_min || 20
-      b = { tokens: rate, lastRefill: now, rate }
-      buckets.set(store_id, b)
-    }
-    const elapsed = (now - b.lastRefill) / 60000
-    if (elapsed > 0) {
-      b.tokens = Math.min(b.rate, b.tokens + elapsed * b.rate)
-      b.lastRefill = now
-    }
-    if (b.tokens >= 1) {
-      b.tokens -= 1
-      return true
-    }
-    return false
+async function ensureRate(pool: Pool, store_id: string, logger: pino.Logger) {
+  const limit = await getRateLimitPerMin(pool, store_id);
+  const now = Date.now();
+  const arr = (sentTimestamps.get(store_id) || []).filter((ts) => now - ts < windowMs);
+  if (arr.length >= limit) {
+    const wait = windowMs - (now - arr[0]);
+    logger.info({ store_id, wait }, 'rate-limit wait');
+    await sleep(wait + 50);
   }
+  arr.push(Date.now());
+  sentTimestamps.set(store_id, arr);
+}
 
-  // Cache sockets through a lightweight in-memory map kept in index.ts.
-  // For simplicity, we will send via API trigger: the index.ts maintains sockets; here we'll just mark status.
-  // In production, prefer consolidating send logic in one process where sockets live.
+async function sendViaSocket(
+  sock: any,
+  to: string,
+  text?: string,
+  media_url?: string,
+  logger?: pino.Logger,
+) {
+  const jid = `${to}@s.whatsapp.net`;
+  if (media_url) {
+    const resp = await fetch(media_url);
+    if (!resp.ok) throw new Error(`download failed: ${resp.status}`);
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const ft = await fileTypeFromBuffer(buf);
+    const mime = ft?.mime || 'application/octet-stream';
 
-  await boss.work('send-message', async (job: any) => {
-  const { session_id, to, text, media_url, conversation_id, store_id, message_id, request_id } = (job?.data as any) || {}
-    const sock = session_id ? getSocket(session_id) : undefined
-    const jid = to.includes('@') ? to : `${to.replace(/[^0-9]/g, '')}@s.whatsapp.net`
-    try {
-      if (!(await allow(store_id))) {
-        // Requeue shortly when tokens are not available
-        await boss.publish('send-message', job.data, { startAfter: 5000 })
-        return true
-      }
-      if (!sock) throw new Error('session socket not found')
+    if (mime.startsWith('image/')) {
+      await sock.sendMessage(jid, { image: buf, mimetype: mime, caption: text || undefined });
+    } else if (mime.startsWith('video/')) {
+      await sock.sendMessage(jid, { video: buf, mimetype: mime, caption: text || undefined });
+    } else {
+      await sock.sendMessage(jid, { document: buf, mimetype: mime, fileName: 'file' });
       if (text) {
-        await sock.sendMessage(jid, { text })
-      } else if (media_url) {
-        // Baixa a mídia e envia como buffer (imagem/documento) conforme tipo
-        const r = await fetch(media_url)
-        if (!r.ok) throw new Error(`media download failed ${r.status}`)
-        const buf = Buffer.from(await r.arrayBuffer())
-        const ft = await fileTypeFromBuffer(buf)
-        if (ft?.mime?.startsWith('image/')) {
-          await sock.sendMessage(jid, { image: buf, caption: text || undefined })
-        } else if (ft?.mime === 'application/pdf') {
-          await sock.sendMessage(jid, { document: buf, mimetype: ft.mime, fileName: 'arquivo.pdf' })
-        } else {
-          // fallback enviar como documento genérico
-          await sock.sendMessage(jid, { document: buf, mimetype: ft?.mime || 'application/octet-stream', fileName: 'arquivo' })
-        }
-      } else {
-        throw new Error('no payload to send')
+        await sock.sendMessage(jid, { text });
       }
-      if (!message_id) {
-        logger.warn({ jobId: job.id, rid: request_id }, 'missing message_id - skipping status update to avoid broad update')
-      } else {
-        await supabase.from('messages').update({ status: 'sent' }).eq('id', message_id)
-      }
-      return true
-    } catch (e: any) {
-      logger.error({ err: e, to, rid: request_id }, 'send failed')
-      // Simple retry by requeueing with delay
-      try { await boss.publish('send-message', job.data, { retryLimit: 3, retryDelay: 5000 }) } catch {}
-      if (!message_id) {
-        logger.warn({ jobId: job.id, rid: request_id }, 'missing message_id on failure - not updating ambiguous rows')
-      } else {
-        await supabase.from('messages').update({ status: 'failed' }).eq('id', message_id)
-      }
-      return false
     }
-  })
+  } else {
+    await sock.sendMessage(jid, { text: text || '' });
+  }
+}
+
+export async function startSender(
+  boss: PgBoss,
+  getSocket: GetSocketFn,
+  pool: Pool,
+  logger: pino.Logger,
+) {
+  await boss.work<SendMessageJob>(
+    'send:message',
+    { teamSize: 1, teamConcurrency: 1 },
+    async (job) => {
+      const { store_id, to, text, media_url, message_id, request_id } = job.data;
+      if (!store_id || !to) return;
+
+      const sock = getSocket(store_id);
+      if (!sock) {
+        logger.warn({ store_id, to, rid: request_id }, 'no active session for store');
+        await boss.publish('send:message', job.data as any, { startAfter: 5000 });
+        return;
+      }
+
+      try {
+        await ensureRate(pool, store_id, logger);
+        await sendViaSocket(sock, to, text || undefined, media_url || undefined, logger);
+
+        if (message_id) {
+          await pool.query(`update messages set status='sent' where id=$1`, [message_id]);
+        }
+        logger.info({ to, rid: request_id }, 'sent ok');
+        return true;
+      } catch (e: any) {
+        logger.error({ err: e, to, rid: request_id }, 'send failed');
+        await boss.publish('send:message', job.data as any, { retryLimit: 3, retryDelay: 5000 });
+        if (message_id) {
+          await pool.query(`update messages set status='failed' where id=$1`, [message_id]);
+        }
+        return false;
+      }
+    },
+  );
 }

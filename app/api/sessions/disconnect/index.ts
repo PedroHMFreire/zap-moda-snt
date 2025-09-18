@@ -1,11 +1,6 @@
 // app/api/sessions/disconnect/index.ts
-import { Pool } from 'pg';
-
-let pool: Pool | null = null;
-function db() {
-  if (!pool) pool = new Pool({ connectionString: process.env.QUEUE_DB_URL });
-  return pool!;
-}
+import { db } from '../../../lib/db';
+import { notifySessionStop } from '../../../lib/queue';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
@@ -18,7 +13,6 @@ export default async function handler(req: any, res: any) {
 
   try {
     const p = db();
-    // marca como disconnected
     const up = await p.query(
       `update whatsapp_sessions
           set status='disconnected', last_qr=null, updated_at=now()
@@ -30,13 +24,8 @@ export default async function handler(req: any, res: any) {
     const sid = up.rows[0].id;
     const stid = up.rows[0].store_id || store_id;
 
-    // notifica o worker para encerramento
-    await p.query(
-      `select pg_notify('boss', json_build_object('name','session:stop','data', json_build_object(
-        'store_id',$1,'session_id',$2
-      ))::text)`,
-      [stid, sid]
-    );
+    // publica job PgBoss para o Worker encerrar a sessão
+    await notifySessionStop({ store_id: stid, session_id: sid });
 
     return res.status(200).json({ ok: true, session_id: sid });
   } catch (e: any) {

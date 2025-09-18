@@ -1,3 +1,4 @@
+// workers/session-node/src/index.ts
 import 'dotenv/config';
 import express from 'express';
 import pino from 'pino';
@@ -5,11 +6,11 @@ import PgBoss from 'pg-boss';
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, WASocket } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import { Pool } from 'pg';
-import { startHealth } from './health'; // expõe /health e /metrics
-import { postInbound } from './inbound'; // POST → /api/inbound (Vercel) com INBOUND_TOKEN
+
+import { startHealth } from './health';
+import { postInbound } from './inbound';
 import { ensureLocalAuthDir, downloadAuthDirFromStorage, uploadAuthDirToStorage } from './sessionStore';
 
-// --------- Config & Globals ----------
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 const PORT = Number(process.env.PORT || 3000);
 const MAX = Number(process.env.MAX_SESSIONS_PER_NODE || 50);
@@ -27,7 +28,10 @@ const pool = new Pool({
 type Session = { sessionId: string; storeId: string; sock: WASocket; authDir: string };
 const sessions = new Map<string, Session>(); // chave: storeId
 
-// --------- Helpers DB ----------
+export function getSocket(storeId: string): WASocket | null {
+  return sessions.get(storeId)?.sock || null;
+}
+
 async function dbQuery<T = any>(sql: string, params?: any[]): Promise<T[]> {
   const r = await pool.query(sql, params);
   return r.rows as T[];
@@ -61,12 +65,10 @@ async function setDisconnected(sessionId: string) {
   ).catch(e => logger.warn({ err: e }, 'setDisconnected failed'));
 }
 
-// --------- Utils ----------
 function jidToPhone(jid: string): string {
-  return (jid || '').split('@')[0]; // "5511999999999@s.whatsapp.net" → "5511999999999"
+  return (jid || '').split('@')[0];
 }
 
-// --------- Baileys Session Lifecycle ----------
 async function startSession(storeId: string, sessionId: string) {
   if (sessions.has(storeId)) {
     logger.info({ storeId }, 'session already running');
@@ -79,9 +81,8 @@ async function startSession(storeId: string, sessionId: string) {
 
   logger.info({ storeId, sessionId }, 'starting session');
 
-  // Diretório local de auth e hidratação do estado salvo (Supabase Storage)
-  const authDir = await ensureLocalAuthDir(sessionId); // ex.: ./auth/<sessionId>
-  await downloadAuthDirFromStorage(sessionId).catch(() => {});
+  const authDir = ensureLocalAuthDir(sessionId);
+  await downloadAuthDirFromStorage(sessionId, authDir).catch(() => {});
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   const sock = makeWASocket({
@@ -90,7 +91,6 @@ async function startSession(storeId: string, sessionId: string) {
     browser: ['Sante', 'Chrome', '1.0']
   });
 
-  // Eventos de conexão
   sock.ev.on('connection.update', async (u) => {
     const { connection, lastDisconnect, qr } = u;
 
@@ -122,17 +122,15 @@ async function startSession(storeId: string, sessionId: string) {
     }
   });
 
-  // Persistência de credenciais
   sock.ev.on('creds.update', async () => {
     try {
       await saveCreds();
-      await uploadAuthDirToStorage(sessionId).catch(() => {});
+      await uploadAuthDirToStorage(sessionId, authDir).catch(() => {});
     } catch (e) {
       logger.warn({ err: e }, 'creds.update failed');
     }
   });
 
-  // Inbound → repassa para /api/inbound
   sock.ev.on('messages.upsert', async (m) => {
     try {
       const msg = m.messages?.[0];
@@ -152,7 +150,7 @@ async function startSession(storeId: string, sessionId: string) {
         name: null,
         type: hasMedia ? 'media' : 'text',
         content: hasMedia ? null : text,
-        media_url: null, // TODO: baixar mídia e subir no Storage; preencher URL aqui
+        media_url: null,
         ts: Date.now()
       });
     } catch (e) {
@@ -174,13 +172,14 @@ async function stopSession(storeId: string, sessionId?: string) {
   }
 }
 
-// --------- Queue (PgBoss) ----------
+// ---------- Queue (PgBoss) ----------
 let boss: PgBoss | null = null;
+
+type SessionJob = { store_id: string; session_id: string };
 
 async function startQueue() {
   boss = new PgBoss({
     connectionString: process.env.QUEUE_DB_URL,
-    // schema: 'pgboss', // se você usa schema custom, descomente
     monitorStateIntervalMinutes: 10
   });
 
@@ -189,88 +188,22 @@ async function startQueue() {
   await boss.start();
   logger.info('pg-boss started');
 
-  // Worker de start/stop de sessão
-  await boss.work('session:start', async (job: { data: { store_id?: string; session_id?: string } }) => {
-    try {
-      const { store_id, session_id } = job.data || {};
-      if (!store_id || !session_id) return;
-      await startSession(store_id, session_id);
-    } catch (e) {
-      logger.error({ err: e }, 'session:start failed');
-      throw e;
-    }
+  await boss.work<SessionJob>('session:start', async (job) => {
+    const { store_id, session_id } = job.data;
+    if (!store_id || !session_id) return;
+    await startSession(store_id, session_id);
   });
 
-  await boss.work('session:stop', async (job: { data: { store_id?: string; session_id?: string } }) => {
-    try {
-      const { store_id, session_id } = job.data || {};
-      if (!store_id) return;
-      await stopSession(store_id, session_id);
-    } catch (e) {
-      logger.error({ err: e }, 'session:stop failed');
-      throw e;
-    }
+  await boss.work<SessionJob>('session:stop', async (job) => {
+    const { store_id, session_id } = job.data;
+    if (!store_id) return;
+    await stopSession(store_id, session_id);
   });
 
-  // Opcional: se você tiver um sender dedicado para 'send:message', inicialize aqui
-  // (Para simplificar, o envio pode ser implementado em um arquivo sender.ts separado.)
-  try {
-    const { startSender } = await import('./sender').catch(() => ({ startSender: null as any }));
-    if (startSender) {
-      await startSender(boss);
-      logger.info('sender worker started');
-    } else {
-      logger.info('sender not present; skipping send:message worker');
-    }
-  } catch (e) {
-    logger.warn({ err: e }, 'startSender unavailable/failed — continuing without it');
-  }
+  const { startSender } = await import('./sender');
+  await startSender(boss, getSocket, pool, logger).catch((e: any) => {
+    logger.warn({ err: e }, 'sender failed to start');
+  });
 }
 
-// --------- HTTP (health/metrics) ----------
-const app = express();
-app.use(express.json());
-
-startHealth(app, {
-  getSessionsActive: () => sessions.size,
-  getSendBacklog: async () => 0 // se quiser medir backlog real, posso te mandar snippet com pg-boss
-});
-
-app.listen(PORT, () => logger.info({ port: PORT }, 'worker listening'));
-
-// --------- Boot ----------
-async function boot() {
-  try {
-    await startQueue();
-  } catch (e) {
-    logger.error({ err: e }, 'Queue failed to start'); // processo continua p/ health/debug
-  }
-}
-boot().catch((e) => {
-  logger.error({ err: e }, 'boot error');
-  process.exit(1);
-});
-
-// --------- Graceful Shutdown ----------
-let shuttingDown = false;
-async function gracefulShutdown() {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  logger.info('Graceful shutdown initiated');
-
-  try {
-    if (boss) await boss.stop({ timeout: 5000 });
-  } catch (e: any) {
-    logger.warn({ err: e }, 'error stopping boss');
-  }
-
-  // Desconecta sessões (Baileys) — creds já foram persistidas em creds.update
-  for (const [storeId, s] of sessions) {
-    try { await s.sock.logout().catch(() => {}); } catch {}
-    sessions.delete(storeId);
-  }
-
-  setTimeout(() => process.exit(0), 3000);
-}
-process.on('SIGINT', gracefulShutdown);
-process.on('SIGTERM', gracefulShutdown);
+// ---------- HTTP (health/metrics
