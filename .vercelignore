@@ -1,4 +1,12 @@
-# Ignore worker and root-only files for the app deployment
-workers/
-README.md
-supabase_schema.sql
+# Artefatos do macOS (criados ao zipar/pastar)
+__MACOSX/
+._*
+
+# Evitar segunda config do Vercel dentro de /app
+app/vercel.json
+
+# (Opcional) Bloquear configs legadas “Now”, se aparecerem
+**/now.json
+**/@now*
+**/now-*
+**/vercel-php*
