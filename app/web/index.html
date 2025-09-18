@@ -5,15 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Santê • WhatsApp IA (Operador)</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Lucide ícones (leve) -->
   <script src="https://unpkg.com/lucide@latest"></script>
-  <!-- Supabase (auth OTP) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
-    /* scroll agradável em listas e chat */
     .nice-scroll::-webkit-scrollbar{width:8px;height:8px}
     .nice-scroll::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:8px}
-    .line-clamp-1{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+    .line-clamp-1{-webkit-line-clamp:1;-webkit-box-orient:vertical;display:-webkit-box;overflow:hidden}
   </style>
 </head>
 <body class="bg-slate-50 text-slate-900">
@@ -30,23 +27,20 @@
 
       <div class="flex-1"></div>
 
-      <!-- Status sessão -->
       <div class="flex items-center gap-2">
         <span id="sessionDot" class="inline-flex h-2.5 w-2.5 rounded-full bg-amber-400"></span>
         <span id="sessionText" class="text-sm text-slate-600">Pendente</span>
         <button id="btnConnect" class="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-slate-50">Conectar WhatsApp</button>
       </div>
 
-      <!-- Modo ausente -->
       <div class="pl-3 border-l">
         <label class="inline-flex items-center gap-2 cursor-pointer">
           <input id="awayToggle" type="checkbox" class="peer hidden" />
-          <span class="w-9 h-5 rounded-full bg-slate-300 peer-checked:bg-emerald-600 transition"></span>
-          <span class="text-sm text-slate-700">Modo Ausente</span>
+        <span class="w-9 h-5 rounded-full bg-slate-300 peer-checked:bg-emerald-600 transition"></span>
+        <span class="text-sm text-slate-700">Modo Ausente</span>
         </label>
       </div>
 
-      <!-- Ações -->
       <div class="pl-3 border-l flex items-center gap-2">
         <a href="config.html" class="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-slate-50">Configurações</a>
         <button id="themeBtn" class="p-2 rounded-lg border bg-white hover:bg-slate-50" title="Alternar tema">
@@ -57,21 +51,16 @@
     </div>
   </header>
 
-  <!-- Layout principal -->
+  <!-- Layout -->
   <main class="max-w-screen-2xl mx-auto p-4 grid grid-cols-12 gap-4">
-    <!-- Coluna 1: Conversas -->
     <section class="col-span-3 bg-white rounded-2xl border p-3 flex flex-col min-h-[75vh]">
       <div class="flex items-center gap-2 mb-2">
         <input id="searchInput" placeholder="Buscar contato..." class="w-full px-3 py-2 rounded-lg border" />
       </div>
-      <div id="conversations" class="flex-1 overflow-auto nice-scroll space-y-1">
-        <!-- iterações aqui -->
-      </div>
+      <div id="conversations" class="flex-1 overflow-auto nice-scroll space-y-1"></div>
     </section>
 
-    <!-- Coluna 2: Chat -->
     <section class="col-span-6 bg-white rounded-2xl border flex flex-col min-h-[75vh]">
-      <!-- Cabeçalho do contato -->
       <div id="chatHeader" class="px-4 py-3 border-b flex items-center justify-between">
         <div>
           <div id="contactName" class="font-semibold">Selecione um contato</div>
@@ -80,12 +69,10 @@
         <div class="text-xs text-slate-500" id="chatInfo">0 msgs</div>
       </div>
 
-      <!-- Mensagens -->
       <div id="messages" class="flex-1 overflow-auto nice-scroll p-4 space-y-2 bg-slate-50">
         <div class="text-center text-slate-400 text-sm">Nenhuma conversa aberta.</div>
       </div>
 
-      <!-- Composer -->
       <div class="border-t p-3 bg-white">
         <div class="flex items-center gap-2 mb-2">
           <button id="quickHello" class="text-xs px-3 py-1 rounded-full border hover:bg-slate-50">Olá! Posso ajudar?</button>
@@ -103,31 +90,33 @@
       </div>
     </section>
 
-    <!-- Coluna 3: Catálogo -->
     <aside class="col-span-3 bg-white rounded-2xl border p-3 flex flex-col min-h-[75vh]">
       <div class="flex items-center gap-2 mb-2">
         <input id="prodSearch" placeholder="Buscar produto, ex.: bermuda M" class="w-full px-3 py-2 rounded-lg border" />
       </div>
-      <div id="catalog" class="flex-1 overflow-auto nice-scroll grid grid-cols-1 gap-3">
-        <!-- cards -->
-      </div>
+      <div id="catalog" class="flex-1 overflow-auto nice-scroll grid grid-cols-1 gap-3"></div>
     </aside>
   </main>
 
-  <!-- Login Overlay -->
+  <!-- Login: email + senha -->
   <div id="loginOverlay" class="fixed inset-0 bg-white z-50 grid place-items-center p-4">
     <div class="w-full max-w-sm bg-white border rounded-2xl p-6 shadow-sm">
       <div class="text-center mb-4">
         <div class="mx-auto w-12 h-12 rounded-xl bg-emerald-600 mb-3"></div>
         <h1 class="font-semibold text-lg">Entrar</h1>
-        <p class="text-sm text-slate-600">Use seu e-mail para receber o código.</p>
+        <p class="text-sm text-slate-600">Use e-mail e senha para entrar.</p>
       </div>
       <label class="block text-sm mb-1">E-mail</label>
       <input id="emailInput" type="email" class="w-full px-3 py-2 rounded-lg border mb-3" placeholder="voce@sua-loja.com" />
-      <button id="otpBtn" class="w-full py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Enviar código</button>
-      <p id="otpStatus" class="text-xs text-slate-500 mt-3">—</p>
+      <label class="block text-sm mb-1">Senha</label>
+      <input id="passInput" type="password" class="w-full px-3 py-2 rounded-lg border mb-3" placeholder="••••••••" />
+      <div class="flex gap-2">
+        <button id="signupBtn" class="w-1/2 py-2 rounded-lg border bg-white hover:bg-slate-50">Criar conta</button>
+        <button id="signinBtn" class="w-1/2 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Entrar</button>
+      </div>
+      <p id="authStatus" class="text-xs text-slate-500 mt-3">—</p>
       <div class="text-xs text-slate-500 mt-4">
-        Dica: você pode ajustar manualmente em <a href="config.html" class="underline">Configurações</a>.
+        Dica: você ainda pode ajustar em <a href="config.html" class="underline">Configurações</a>.
       </div>
     </div>
   </div>
@@ -142,15 +131,13 @@
           <button id="qrClose" class="p-1 rounded-lg border hover:bg-slate-50"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
         <ol class="list-decimal text-sm text-slate-600 pl-5 mb-3">
-          <li>Abra o WhatsApp &rarr; Dispositivos Conectados</li>
+          <li>Abra o WhatsApp → Dispositivos Conectados</li>
           <li>Toque em “Conectar um dispositivo”</li>
           <li>Escaneie o QR abaixo</li>
         </ol>
-
         <div id="qrBox" class="aspect-square w-full grid place-items-center bg-slate-100 rounded-xl overflow-hidden">
           <div class="text-slate-500 text-sm">Gerando QR...</div>
         </div>
-
         <div class="mt-3 flex items-center justify-between text-sm">
           <div class="flex items-center gap-2">
             <span id="qrDot" class="inline-flex h-2.5 w-2.5 rounded-full bg-amber-400"></span>
@@ -162,21 +149,18 @@
     </div>
   </div>
 
-  <!-- Toast -->
   <div id="toast" class="fixed bottom-4 right-4 z-40 hidden"></div>
 
   <script>
-    // ============ Auto-config ============
+    // ------------ Auto-config -------------
     async function loadConfig() {
-      // 1) tenta localStorage
       const ls = (k) => localStorage.getItem(k) || "";
       let SUPABASE_URL  = ls("SUPABASE_URL");
       let SUPABASE_ANON = ls("SUPABASE_ANON_KEY");
       let API_BASE      = ls("API_BASE");
       let STORE_ID      = ls("STORE_ID");
 
-      // 2) se faltar algo, busca /api/config
-      if (!SUPABASE_URL || !SUPABASE_ANON || !STORE_ID) {
+      if (!SUPABASE_URL || !SUPABASE_ANON) {
         try {
           const r = await fetch("/api/config");
           if (r.ok) {
@@ -190,31 +174,21 @@
             if (API_BASE)      localStorage.setItem("API_BASE", API_BASE);
             if (STORE_ID)      localStorage.setItem("STORE_ID", STORE_ID);
           }
-        } catch (e) {
-          console.warn("Falha ao obter /api/config", e);
-        }
-      }
-
-      // 3) avisa na UI se ainda estiver faltando
-      if (!SUPABASE_URL || !SUPABASE_ANON) {
-        const st = document.getElementById('otpStatus');
-        if (st) st.textContent = 'Config ausente. Defina SUPABASE_URL e SUPABASE_ANON_KEY em /config ou via /api/config.';
+        } catch (e) {}
       }
     }
 
-    // ============ Config ============
     const cfg = {
       get supabaseUrl(){ return localStorage.getItem('SUPABASE_URL') || ''; },
       get supabaseAnon(){ return localStorage.getItem('SUPABASE_ANON_KEY') || ''; },
-      get apiBase(){ return localStorage.getItem('API_BASE') || ''; }, // vazio = mesma origem
+      get apiBase(){ return localStorage.getItem('API_BASE') || ''; },
       get storeId(){ return localStorage.getItem('STORE_ID') || ''; },
+      set storeId(v){ localStorage.setItem('STORE_ID', v || ''); },
       get away(){ return localStorage.getItem('AWAY') === '1'; },
       set away(v){ localStorage.setItem('AWAY', v ? '1':'0'); }
     };
 
-    // ============ Helpers ============
-    const $ = (sel)=>document.querySelector(sel);
-    const $$ = (sel)=>Array.from(document.querySelectorAll(sel));
+    const $ = (s)=>document.querySelector(s);
     const toast = (msg, type='info')=>{
       const el = document.getElementById('toast');
       el.innerHTML = `<div class="px-4 py-2 rounded-lg shadow bg-white border ${type==='error'?'border-rose-300':'border-slate-200'}">${msg}</div>`;
@@ -234,42 +208,85 @@
       return fetch(base+path, Object.assign(init, {headers}));
     };
 
-    // ============ Auth (Supabase OTP) ============
     let supa = null;
-    async function ensureSupabase(){
+    function ensureSupabase(){
       if(!cfg.supabaseUrl || !cfg.supabaseAnon){
-        $('#otpStatus').textContent = 'Config faltando: defina SUPABASE_URL e SUPABASE_ANON_KEY.';
+        $('#authStatus').textContent = 'Config ausente: SUPABASE_URL e SUPABASE_ANON_KEY.';
         return null;
       }
       supa = supa || window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnon);
       return supa;
     }
-    async function handleOTP(){
+
+    async function signup() {
       const email = $('#emailInput').value.trim();
-      if(!email){ $('#otpStatus').textContent = 'Informe um e-mail válido.'; return; }
-      const s = await ensureSupabase(); if(!s) return;
-      $('#otpStatus').textContent = 'Enviando código...';
-      const { error } = await s.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href }});
-      if(error){ $('#otpStatus').textContent = 'Erro: '+error.message; return; }
-      $('#otpStatus').textContent = 'Código enviado. Verifique seu e-mail.';
-    }
-    async function checkSession(){
-      const s = await ensureSupabase(); if(!s) return false;
-      const { data } = await s.auth.getSession();
-      const ok = !!data.session;
-      $('#loginOverlay').classList.toggle('hidden', ok);
+      const password = $('#passInput').value.trim();
+      if(!email || !password){ $('#authStatus').textContent = 'Informe e-mail e senha.'; return; }
+      const s = ensureSupabase(); if(!s) return;
+      $('#authStatus').textContent = 'Criando conta...';
+      const { data, error } = await s.auth.signUp({ email, password });
+      if (error) { $('#authStatus').textContent = 'Erro: '+error.message; return; }
+      $('#authStatus').textContent = 'Conta criada. Entrando...';
+      // alguns projetos exigem confirmação por e-mail; se estiver desativada, já teremos sessão
+      const ok = await signin(); // faz signin para garantir sessão
       return ok;
     }
 
-    // ============ Conversas ============
+    async function signin() {
+      const email = $('#emailInput').value.trim();
+      const password = $('#passInput').value.trim();
+      if(!email || !password){ $('#authStatus').textContent = 'Informe e-mail e senha.'; return false; }
+      const s = ensureSupabase(); if(!s) return false;
+      $('#authStatus').textContent = 'Entrando...';
+      const { data, error } = await s.auth.signInWithPassword({ email, password });
+      if (error) { $('#authStatus').textContent = 'Erro: '+error.message; return false; }
+      $('#authStatus').textContent = 'Autenticado. Preparando sua loja...';
+      await afterLoginBootstrap();
+      return true;
+    }
+
+    async function afterLoginBootstrap() {
+      const s = ensureSupabase(); if(!s) return;
+      const { data } = await s.auth.getSession();
+      const token = data?.session?.access_token;
+      if (!token) { $('#authStatus').textContent = 'Sem sessão ativa.'; return; }
+
+      // cria/pega a store automaticamente
+      const r = await api('/api/stores/bootstrap', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if(!r.ok){
+        $('#authStatus').textContent = 'Falha ao preparar a loja';
+        return;
+      }
+      const j = await r.json();
+      cfg.storeId = j.store_id;
+      $('#storeNameTop').textContent = `Loja #${j.store_id.slice(0,8)}`;
+
+      // esconde login e carrega UI
+      $('#loginOverlay').classList.add('hidden');
+      await initData();
+    }
+
+    async function checkSession(){
+      const s = ensureSupabase(); if(!s) return false;
+      const { data } = await s.auth.getSession();
+      const ok = !!data.session;
+      $('#loginOverlay').classList.toggle('hidden', ok);
+      if(ok && !cfg.storeId){ await afterLoginBootstrap(); }
+      return ok;
+    }
+
+    // ------------ Dados/UI -------------
     let state = { contact: null, messages: [] };
+
     async function loadContacts(q=''){
       const url = '/api/contacts'+(q?`?q=${encodeURIComponent(q)}`:'');
       const r = await api(url);
       if(!r.ok){ toast('Erro ao carregar contatos','error'); return; }
       const list = await r.json();
-      const wrap = $('#conversations');
-      wrap.innerHTML = '';
+      const wrap = $('#conversations'); wrap.innerHTML='';
       list.forEach(c=>{
         const li = document.createElement('button');
         li.className = 'w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 border';
@@ -284,6 +301,7 @@
         wrap.appendChild(li);
       });
     }
+
     function renderMessages(){
       const box = $('#messages'); box.innerHTML='';
       if(!state.contact){
@@ -309,23 +327,20 @@
       box.scrollTop = box.scrollHeight;
       $('#chatInfo').textContent = `${state.messages.length} msgs`;
     }
+
     async function openContact(c){
       state.contact = c;
-      state.messages = []; // futuro: carregar do backend
+      state.messages = []; // futuro: buscar histórico
       renderMessages();
     }
 
-    // ============ Catálogo ============
     async function loadProducts(q=''){
       const url = '/api/products'+(q?`?q=${encodeURIComponent(q)}`:'');
       const r = await api(url);
       if(!r.ok){ toast('Erro ao carregar produtos','error'); return; }
       const items = await r.json();
       const wrap = $('#catalog'); wrap.innerHTML='';
-      if(!items.length){
-        wrap.innerHTML = `<div class="text-sm text-slate-500">Sem produtos.</div>`;
-        return;
-      }
+      if(!items.length){ wrap.innerHTML = `<div class="text-sm text-slate-500">Sem produtos.</div>`; return; }
       items.forEach(p=>{
         const el = document.createElement('div');
         el.className = 'border rounded-xl p-3';
@@ -349,7 +364,6 @@
       });
     }
 
-    // ============ Envio ============
     async function sendMessage(){
       if(!state.contact){ toast('Selecione um contato','error'); return; }
       const text = $('#composer').value.trim();
@@ -357,120 +371,101 @@
       const body = { to: state.contact.phone || state.contact.wa_id, text, store_id: cfg.storeId };
       const r = await api('/api/send',{ method:'POST', body: JSON.stringify(body) });
       if(!r.ok){ toast('Falha ao enfileirar mensagem','error'); return; }
-      // Otimismo visual
       state.messages.push({ direction:'out', content:text, created_at: Date.now() });
       $('#composer').value = '';
       renderMessages();
     }
 
-    // ============ QR / Sessão ============
+    // QR / Sessão (igual)
     let qrTimerInt = null, qrPollInt = null, currentSessionId = null, qrSeconds = 60;
     function openQR(){
-      if(!cfg.storeId){ toast('Defina STORE_ID em /api/config ou /config','error'); return; }
-      $('#qrModal').classList.remove('hidden');
-      $('#qrBox').innerHTML = `<div class="text-slate-500 text-sm">Gerando QR...</div>`;
-      $('#qrStatus').textContent = 'Pendente'; $('#qrDot').className='inline-flex h-2.5 w-2.5 rounded-full bg-amber-400';
-      $('#qrTimer').textContent = '60s';
+      if(!cfg.storeId){ toast('Loja não preparada ainda. Faça login.','error'); return; }
+      document.getElementById('qrModal').classList.remove('hidden');
+      document.getElementById('qrBox').innerHTML = `<div class="text-slate-500 text-sm">Gerando QR...</div>`;
+      document.getElementById('qrStatus').textContent = 'Pendente';
+      document.getElementById('qrDot').className='inline-flex h-2.5 w-2.5 rounded-full bg-amber-400';
+      document.getElementById('qrTimer').textContent = '60s';
       qrSeconds = 60;
-      // criar sessão
+
       api('/api/sessions/create', { method: 'POST', body: JSON.stringify({ store_id: cfg.storeId }) })
       .then(r=>r.json()).then(d=>{
         currentSessionId = d.session_id;
         if(d.qr){
-          const img = new Image();
-          img.src = d.qr;
-          img.className = 'w-64 h-64 object-contain';
-          $('#qrBox').innerHTML = '';
-          $('#qrBox').appendChild(img);
+          const img = new Image(); img.src = d.qr; img.className='w-64 h-64 object-contain';
+          document.getElementById('qrBox').innerHTML = ''; document.getElementById('qrBox').appendChild(img);
         } else {
-          $('#qrBox').innerHTML = `<div class="text-rose-500 text-sm">QR não recebido.</div>`;
+          document.getElementById('qrBox').innerHTML = `<div class="text-rose-500 text-sm">QR não recebido.</div>`;
         }
-        // timer
         clearInterval(qrTimerInt);
         qrTimerInt = setInterval(()=>{
-          qrSeconds--; if(qrSeconds<=0){ clearInterval(qrTimerInt); } 
-          $('#qrTimer').textContent = `${Math.max(0,qrSeconds)}s`;
+          qrSeconds--; if(qrSeconds<=0){ clearInterval(qrTimerInt); }
+          document.getElementById('qrTimer').textContent = `${Math.max(0,qrSeconds)}s`;
         }, 1000);
-        // polling status
         clearInterval(qrPollInt);
         qrPollInt = setInterval(async ()=>{
           const rs = await api(`/api/sessions/status?session_id=${encodeURIComponent(currentSessionId)}`);
           if(!rs.ok) return;
-          const st = await rs.json(); // {status: 'connected'|'pending'|'failed'}
+          const st = await rs.json();
           setSessionUI(st.status || 'pending');
-          $('#qrStatus').textContent = (st.status||'pending');
+          document.getElementById('qrStatus').textContent = (st.status||'pending');
           const map = {connected:'bg-emerald-500', pending:'bg-amber-400', failed:'bg-rose-500'};
-          $('#qrDot').className = 'inline-flex h-2.5 w-2.5 rounded-full '+(map[st.status]||'bg-amber-400');
+          document.getElementById('qrDot').className = 'inline-flex h-2.5 w-2.5 rounded-full '+(map[st.status]||'bg-amber-400');
           if(st.status==='connected'){
             clearInterval(qrPollInt); clearInterval(qrTimerInt);
             toast('WhatsApp conectado!');
-            $('#qrModal').classList.add('hidden');
+            document.getElementById('qrModal').classList.add('hidden');
           }
         }, 2000);
       }).catch(()=>{
-        $('#qrBox').innerHTML = `<div class="text-rose-500 text-sm">Erro ao criar sessão.</div>`;
+        document.getElementById('qrBox').innerHTML = `<div class="text-rose-500 text-sm">Erro ao criar sessão.</div>`;
       });
     }
 
-    // ============ Tema ============
+    // Tema
     let dark=false;
     function toggleTheme(){
       dark = !dark;
       document.documentElement.classList.toggle('dark', dark);
       document.body.classList.toggle('bg-slate-900', dark);
       document.body.classList.toggle('text-slate-100', dark);
-      $('#themeBtn').innerHTML = dark ? '<i data-lucide="moon" class="w-4 h-4"></i>' : '<i data-lucide="sun" class="w-4 h-4"></i>';
+      document.getElementById('themeBtn').innerHTML = dark ? '<i data-lucide="moon" class="w-4 h-4"></i>' : '<i data-lucide="sun" class="w-4 h-4"></i>';
       lucide.createIcons();
     }
 
-    // ============ Init ============
-    async function init(){
-      lucide.createIcons();
-
-      // carrega config automática (localStorage ou /api/config)
-      await loadConfig();
-
-      // bind UI
-      $('#otpBtn').onclick = handleOTP;
-      $('#logoutBtn').onclick = async ()=>{
-        if(supa){ await supa.auth.signOut(); }
-        location.reload();
-      };
-      $('#btnConnect').onclick = openQR;
-      $('#qrClose').onclick = ()=>$('#qrModal').classList.add('hidden');
-      $('#themeBtn').onclick = toggleTheme;
-      $('#quickHello').onclick = ()=>{ $('#composer').value = 'Olá! Posso ajudar?'; };
-      $('#quickFrete').onclick = ()=>{ $('#composer').value = 'Qual seu CEP? Verifico frete e prazo pra você.'; };
-      $('#quickTroca').onclick = ()=>{ $('#composer').value = 'Nossas trocas podem ser feitas em até 30 dias com etiqueta.'; };
-      $('#sendBtn').onclick = sendMessage;
-      $('#composer').addEventListener('keydown', (e)=>{ if((e.metaKey||e.ctrlKey) && e.key==='Enter'){ sendMessage(); }});
-      $('#attachBtn').onclick = ()=>$('#fileInput').click();
-      $('#searchInput').addEventListener('input', (e)=>loadContacts(e.target.value));
-      $('#prodSearch').addEventListener('input', (e)=>loadProducts(e.target.value));
-
-      // away toggle
-      $('#awayToggle').checked = cfg.away;
-      $('#awayToggle').onchange = async (e)=>{
-        cfg.away = e.target.checked;
-        toast(cfg.away?'Modo Ausente ligado':'Modo Ausente desligado');
-      };
-
-      // nome da loja (placeholder visual)
-      $('#storeNameTop').textContent = cfg.storeId ? `Loja #${cfg.storeId.slice(0,8)}` : 'Loja não definida';
-
-      // auth
-      const ok = await checkSession();
-      if(!ok){ return; } // mantém overlay de login
-
-      // carregar listas
-      loadContacts();
-      loadProducts();
-
-      // estado inicial sessão
+    async function initData(){
+      document.getElementById('storeNameTop').textContent = cfg.storeId ? `Loja #${cfg.storeId.slice(0,8)}` : 'Loja não definida';
+      await Promise.all([loadContacts(), loadProducts()]);
       setSessionUI('pending');
     }
 
-    init();
+    function bindUI(){
+      document.getElementById('signinBtn').onclick = signin;
+      document.getElementById('signupBtn').onclick = signup;
+      document.getElementById('logoutBtn').onclick = async ()=>{ if(supa){ await supa.auth.signOut(); } location.reload(); };
+      document.getElementById('btnConnect').onclick = openQR;
+      document.getElementById('qrClose').onclick = ()=>document.getElementById('qrModal').classList.add('hidden');
+      document.getElementById('themeBtn').onclick = toggleTheme;
+      document.getElementById('quickHello').onclick = ()=>{ document.getElementById('composer').value = 'Olá! Posso ajudar?'; };
+      document.getElementById('quickFrete').onclick = ()=>{ document.getElementById('composer').value = 'Qual seu CEP? Verifico frete e prazo pra você.'; };
+      document.getElementById('quickTroca').onclick = ()=>{ document.getElementById('composer').value = 'Nossas trocas podem ser feitas em até 30 dias com etiqueta.'; };
+      document.getElementById('sendBtn').onclick = sendMessage;
+      document.getElementById('composer').addEventListener('keydown', (e)=>{ if((e.metaKey||e.ctrlKey) && e.key==='Enter'){ sendMessage(); }});
+      document.getElementById('attachBtn').onclick = ()=>document.getElementById('fileInput').click();
+      document.getElementById('searchInput').addEventListener('input', (e)=>loadContacts(e.target.value));
+      document.getElementById('prodSearch').addEventListener('input', (e)=>loadProducts(e.target.value));
+      document.getElementById('awayToggle').checked = cfg.away;
+      document.getElementById('awayToggle').onchange = (e)=>{ cfg.away = e.target.checked; toast(cfg.away?'Modo Ausente ligado':'Modo Ausente desligado'); };
+    }
+
+    (async function init(){
+      lucide.createIcons();
+      await loadConfig();
+      bindUI();
+      const s = ensureSupabase();
+      if(!s) return;
+      const ok = await checkSession();
+      if(ok){ await initData(); }
+    })();
   </script>
 </body>
 </html>
