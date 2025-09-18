@@ -1,25 +1,35 @@
 {
-  "name": "zap-moda-snt",
+  "name": "zap-moda-snt-app",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
-  "workspaces": [
-    "app",
-    "workers/session-node"
-  ],
-  "engines": { "node": ">=18" },
-  "dependencies": {
-    "concurrently": "^8.2.2"
-  },
-  "devDependencies": {
-    "vercel": "^33.7.0"
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
-    "install:all": "npm --prefix app install && npm --prefix workers/session-node install",
-    "dev:api": "vercel dev",
-    "dev:worker": "npm --prefix workers/session-node run dev",
-    "dev": "concurrently \"vercel dev\" \"npm --prefix workers/session-node run dev\"",
-    "postinstall": "echo done",
-    "lint": "echo 'No lint configured'",
-    "format": "echo 'No format configured'"
+    "dev": "vercel dev",
+    "build": "echo 'Vercel builds serverless by file'",
+    "start": "vercel dev",
+    "test": "vitest run --reporter=default",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "pg-boss": "^9.0.3",
+    "zod": "^3.23.8",
+    "openai": "^4.57.1",
+    "@supabase/supabase-js": "^2.45.4",
+    "pino": "^9.4.0",
+    "pino-pretty": "^11.2.2",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.30",
+    "vitest": "^1.6.0",
+    "supertest": "^6.3.4",
+    "@types/supertest": "^2.0.16"
   }
 }

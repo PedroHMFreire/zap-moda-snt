@@ -1,42 +1,51 @@
-import express from 'express'
-import { requireAuth } from '../../lib/auth'
-import { supabaseService } from '../../lib/supabaseClient'
+// app/api/sessions/create/index.ts
+import { Pool } from 'pg';
 
-const app = express()
-app.use(express.json())
+let pool: Pool | null = null;
+function db() {
+  if (!pool) pool = new Pool({ connectionString: process.env.QUEUE_DB_URL });
+  return pool!;
+}
 
-app.get('*', requireAuth(), async (req, res) => {
-  const store_id = (req.query.store_id as string) || ''
-  const sb = supabaseService()
-  if (store_id) {
-    const { data, error } = await sb.from('stores').select('*, whatsapp_configs(*)').eq('id', store_id).maybeSingle()
-    if (error) return res.status(500).json({ error: error.message })
-    return res.json(data)
+function getStoreId(req: any) {
+  return req.headers['x-store-id'] || req.query.store_id || req.body?.store_id;
+}
+
+export default async function handler(req: any, res: any) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'Method not allowed' });
   }
-  // list stores for current owner
-  const user = (req as any).user
-  const { data, error } = await sb.from('stores').select('id, name, created_at').eq('owner_id', user.id).order('created_at', { ascending: false })
-  if (error) return res.status(500).json({ error: error.message })
-  return res.json(data)
-})
+  const store_id = getStoreId(req);
+  if (!store_id) return res.status(400).json({ error: 'store_id obrigatório (header x-store-id ou query/body).' });
 
-app.post('*', requireAuth(), async (req, res) => {
-  const sb = supabaseService()
-  const { store, config } = req.body || {}
-  const user = (req as any).user
-  let storeId = store?.id as string | undefined
-  if (storeId) {
-    await sb.from('stores').update({ ...store, id: storeId }).eq('id', storeId)
-  } else if (store?.name) {
-    const { data, error } = await sb.from('stores').insert({ name: store.name, description: store.description || null, owner_id: user.id }).select('id').single()
-    if (error) return res.status(500).json({ error: error.message })
-    storeId = data.id
-  }
-  if (storeId) {
-    const cfg = { store_id: storeId, channel: config?.channel || 'qr', rate_limit_per_min: config?.rate_limit_per_min ?? 20, enabled: config?.enabled ?? true }
-    await sb.from('whatsapp_configs').upsert(cfg)
-  }
-  return res.json({ ok: true, store_id: storeId })
-})
+  try {
+    const p = db();
+    // cria sessão pendente
+    const created = await p.query(
+      `insert into whatsapp_sessions (store_id, status, last_qr)
+       values ($1, 'pending', null)
+       returning id, status, last_qr, connected_at, updated_at`,
+      [store_id]
+    );
+    const sess = created.rows[0];
+    const session_id = sess.id;
 
-export default app
+    // dispara job para o Worker (via NOTIFY ou fila pg-boss)
+    await p.query(
+      `select pg_notify('boss', json_build_object('name','session:start','data', json_build_object(
+        'store_id',$1,'session_id',$2
+      ))::text)`,
+      [store_id, session_id]
+    );
+
+    // retorna payload inicial; se o Worker já tiver gravado um QR, ele vem em last_qr
+    return res.status(200).json({
+      session_id,
+      status: sess.status || 'pending',
+      qr: sess.last_qr || null
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+}

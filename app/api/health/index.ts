@@ -1,11 +1,18 @@
-import express from 'express'
-import { requestLogger } from '../../lib/logger'
+// app/api/health/index.ts
+import { Pool } from 'pg';
 
-const app = express()
-app.use(requestLogger())
+let pool: Pool | null = null;
+function getPool() {
+  if (!pool) pool = new Pool({ connectionString: process.env.QUEUE_DB_URL });
+  return pool;
+}
 
-app.get('*', (req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() })
-})
-
-export default app
+export default async function handler(req: any, res: any) {
+  try {
+    const db = getPool();
+    const r = await db.query('select now() as ts');
+    res.status(200).json({ ok: true, ts: r.rows[0].ts });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+}

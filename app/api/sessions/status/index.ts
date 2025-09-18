@@ -1,17 +1,42 @@
-import express from 'express'
-import { supabaseService } from '../../../lib/supabaseClient'
+// app/api/sessions/status/index.ts
+import { Pool } from 'pg';
 
-const app = express()
-app.use(express.json())
+let pool: Pool | null = null;
+function db() {
+  if (!pool) pool = new Pool({ connectionString: process.env.QUEUE_DB_URL });
+  return pool!;
+}
 
-app.get('*', async (req, res) => {
-  const session_id = (req.query.session_id as string) || ''
-  if (!session_id) return res.status(400).json({ error: 'session_id required' })
-  const sb = supabaseService()
-  const { data, error } = await sb.from('whatsapp_sessions').select('status, connected_at, updated_at').eq('id', session_id).maybeSingle()
-  if (error) return res.status(500).json({ error: error.message })
-  if (!data) return res.status(404).json({ error: 'not found' })
-  return res.json({ status: data.status || 'pending', connected_at: data.connected_at, updated_at: data.updated_at })
-})
+export default async function handler(req: any, res: any) {
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
-export default app
+  const session_id = req.query.session_id || req.body?.session_id;
+  if (!session_id) return res.status(400).json({ error: 'session_id obrigatório.' });
+
+  try {
+    const p = db();
+    const r = await p.query(
+      `select id, store_id, status, last_qr, connected_at, updated_at
+         from whatsapp_sessions
+        where id = $1
+        limit 1`,
+      [session_id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Sessão não encontrada' });
+    const s = r.rows[0];
+
+    return res.status(200).json({
+      session_id: s.id,
+      store_id: s.store_id,
+      status: s.status || 'pending',
+      last_qr: s.last_qr || null,
+      connected_at: s.connected_at,
+      updated_at: s.updated_at
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+}

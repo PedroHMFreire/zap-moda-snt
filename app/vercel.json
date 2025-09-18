@@ -1,4 +1,5 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "outputDirectory": "web",
   "functions": {
@@ -7,5 +8,6 @@
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" }
-  ]
+  ],
+  "cleanUrls": true
 }

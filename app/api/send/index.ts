@@ -1,67 +1,87 @@
-import express from 'express'
-import { sendSchema } from '../../lib/validators'
-import { requireAuth, assertStoreOwnership } from '../../lib/auth'
-import { enqueueSend } from '../../lib/queue'
-import { supabaseService } from '../../lib/supabaseClient'
-import { normalizePhone, isValidPhone } from '../../lib/phone'
-import { hitRateLimit } from '../../lib/rateLimit'
-import { requestLogger } from '../../lib/logger'
-import { cache } from '../../lib/cache'
+// app/api/send/index.ts
+import { Pool } from 'pg';
 
-const app = express()
-app.use(requestLogger())
-app.use(express.json())
+let pool: Pool | null = null;
+function getPool() {
+  if (!pool) pool = new Pool({ connectionString: process.env.QUEUE_DB_URL });
+  return pool;
+}
+function getStoreId(req: any) {
+  return req.headers['x-store-id'] || req.query.store_id || req.body?.store_id;
+}
 
-app.post('*', requireAuth(), async (req, res) => {
-  const parse = sendSchema.safeParse(req.body)
-  if (!parse.success) return res.status(400).json({ error: parse.error.flatten() })
-  const payload = parse.data
-  try {
-    await assertStoreOwnership((req as any).user.id, payload.store_id)
-  } catch {
-    return res.status(403).json({ error: 'forbidden' })
+async function ensureContactAndConversation(db: Pool, store_id: string, phoneOrWa: string) {
+  // procura contato por phone ou wa_id
+  let r = await db.query(
+    `select id from contacts where store_id=$1 and (phone=$2 or wa_id=$2) limit 1`,
+    [store_id, phoneOrWa]
+  );
+  let contact_id: string;
+  if (r.rowCount === 0) {
+    r = await db.query(
+      `insert into contacts (store_id, phone, wa_id, last_interaction_at) values ($1,$2,$2, now()) returning id`,
+      [store_id, phoneOrWa]
+    );
   }
-  // Rate limit (per store) using configured limit in whatsapp_configs (cached)
+  contact_id = r.rows[0].id;
+
+  // conversa aberta (ou cria)
+  r = await db.query(
+    `select id from conversations where store_id=$1 and contact_id=$2 and status='open' order by created_at desc limit 1`,
+    [store_id, contact_id]
+  );
+  let conversation_id: string;
+  if (r.rowCount === 0) {
+    r = await db.query(
+      `insert into conversations (store_id, contact_id, status, last_message_at)
+       values ($1,$2,'open', now()) returning id`,
+      [store_id, contact_id]
+    );
+  }
+  conversation_id = r.rows[0].id;
+
+  return { contact_id, conversation_id };
+}
+
+export default async function handler(req: any, res: any) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const db = getPool();
+  const store_id = getStoreId(req);
+  if (!store_id) return res.status(400).json({ error: 'store_id obrigatório.' });
+
   try {
-    const key = `whatsapp_cfg:${payload.store_id}`
-    const cfg = await cache.wrap<{ rate_limit_per_min?: number } | null>(key, undefined, async () => {
-      const sb = supabaseService()
-      const { data } = await sb.from('whatsapp_configs').select('rate_limit_per_min').eq('store_id', payload.store_id).maybeSingle()
-      return data || null
-    })
-    const limit = cfg?.rate_limit_per_min || 20
-    const rl = await hitRateLimit(`send:${payload.store_id}`, limit, 60)
-    if (!rl.allowed) {
-      return res.status(429).json({ error: 'rate_limited', limit, retry_at: rl.reset })
+    const { to, text, media_url } = req.body || {};
+    if (!to || (!text && !media_url)) {
+      return res.status(400).json({ error: 'to e (text ou media_url) são obrigatórios.' });
     }
-  } catch (e:any) {
-    // Fail-closed to prevent abuse if we cannot validate limits
-    return res.status(503).json({ error: 'rate_limit_unavailable', detail: e.message })
-  }
-  // create message row now (single writer) to track status
-  const sb = supabaseService()
-  const { data: msg, error } = await sb.from('messages').insert({
-    store_id: payload.store_id,
-    contact_id: payload.contact_id || null,
-    conversation_id: payload.conversation_id || null,
-    direction: 'out',
-    type: payload.media_url ? 'media' : 'text',
-    content: payload.text || payload.media_url || null,
-    media_url: payload.media_url || null,
-    status: 'queued'
-  }).select('id').single()
-  if (error) return res.status(500).json({ error: error.message })
-  const normTo = normalizePhone(payload.to)
-  if (!isValidPhone(normTo)) return res.status(400).json({ error: 'invalid phone number' })
-  await enqueueSend({
-    ...payload,
-    message_id: msg.id,
-    session_id: payload.session_id,
-    to: normTo,
-    store_id: payload.store_id,
-    request_id: (req as any).request_id
-  })
-  return res.json({ ok: true, message_id: msg.id })
-})
 
-export default app
+    const { contact_id, conversation_id } = await ensureContactAndConversation(db, store_id, to);
+
+    // grava a mensagem com status 'queued'
+    const m = await db.query(
+      `insert into messages (conversation_id, store_id, contact_id, direction, type, content, media_url, status, created_at)
+       values ($1,$2,$3,'out', $4, $5, $6, 'queued', now())
+       returning id`,
+      [conversation_id, store_id, contact_id, media_url ? 'media' : 'text', text || null, media_url || null]
+    );
+    const message_id = m.rows[0].id;
+
+    // enfileira para o Worker (pg-boss)
+    await db.query(
+      `select pg_notify('boss', json_build_object('name','send:message','data', json_build_object(
+          'store_id',$1,'to',$2,'text',$3,'media_url',$4,'conversation_id',$5,'contact_id',$6,'message_id',$7
+        ))::text)`,
+      [store_id, to, text || null, media_url || null, conversation_id, contact_id, message_id]
+    );
+    // Acima: uso NOTIFY como fallback simples. Se já tiver pg-boss instalado, o Worker pode escutar a fila/notify.
+    // (Em produção: usar INSERT na tabela de jobs do pg-boss conforme setup do seu queue.ts.)
+
+    return res.status(202).json({ enqueued: true, message_id, conversation_id, contact_id });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+}

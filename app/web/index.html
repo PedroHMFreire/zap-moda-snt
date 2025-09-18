@@ -1,276 +1,438 @@
 <!doctype html>
 <html lang="pt-BR">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Santê Operador</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      // Load Supabase client dynamically
-      window.addEventListener('DOMContentLoaded', async () => {
-        const cfg = await fetch('/api/config').then(r=>r.json())
-        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2')
-        const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey)
-        window.supabase = supabase
-
-        async function requireLogin() {
-          const { data } = await supabase.auth.getUser()
-          if (!data?.user) {
-            const email = prompt('Digite seu e-mail para login magic link:')
-            if (email) {
-              await supabase.auth.signInWithOtp({ email })
-              alert('Enviamos um link para seu e-mail. Após abrir, recarregue a página.')
-            }
-          }
-        }
-        requireLogin()
-
-        async function tryInit() {
-          const session = (await supabase.auth.getSession()).data.session
-          if (session && window.initApp) window.initApp()
-        }
-        tryInit()
-        supabase.auth.onAuthStateChange((_event, session) => {
-          if (session && window.initApp) window.initApp()
-        })
-      })
-    </script>
-  </head>
-  <body class="h-screen w-screen bg-gray-50 text-gray-900">
-    <div class="flex h-full">
-      <!-- Conversas -->
-      <aside class="w-1/4 border-r bg-white flex flex-col">
-        <div class="p-3 border-b space-y-2">
-          <select id="store-select" class="w-full border rounded px-3 py-2"></select>
-          <input id="search" class="w-full border rounded px-3 py-2" placeholder="Buscar conversas" />
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Santê • WhatsApp IA (Operador)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide ícones (leve) -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Supabase (auth OTP) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    /* scroll agradável em listas e chat */
+    .nice-scroll::-webkit-scrollbar{width:8px;height:8px}
+    .nice-scroll::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:8px}
+    .line-clamp-1{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <!-- Topbar -->
+  <header class="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-slate-200">
+    <div class="max-w-screen-2xl mx-auto px-4 py-3 flex items-center gap-3">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-xl bg-emerald-600"></div>
+        <div>
+          <div class="font-semibold -mb-1">Santê • WhatsApp IA</div>
+          <div id="storeNameTop" class="text-xs text-slate-500">Loja atual</div>
         </div>
-        <div id="conversations" class="flex-1 overflow-auto">
-          <!-- placeholder -->
-          <div class="p-3 text-sm text-gray-500">Selecione uma loja para ver conversas.</div>
+      </div>
+
+      <div class="flex-1"></div>
+
+      <!-- Status sessão -->
+      <div class="flex items-center gap-2">
+        <span id="sessionDot" class="inline-flex h-2.5 w-2.5 rounded-full bg-amber-400"></span>
+        <span id="sessionText" class="text-sm text-slate-600">Pendente</span>
+        <button id="btnConnect" class="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-slate-50">Conectar WhatsApp</button>
+      </div>
+
+      <!-- Modo ausente -->
+      <div class="pl-3 border-l">
+        <label class="inline-flex items-center gap-2 cursor-pointer">
+          <input id="awayToggle" type="checkbox" class="peer hidden" />
+          <span class="w-9 h-5 rounded-full bg-slate-300 peer-checked:bg-emerald-600 transition"></span>
+          <span class="text-sm text-slate-700">Modo Ausente</span>
+        </label>
+      </div>
+
+      <!-- Ações -->
+      <div class="pl-3 border-l flex items-center gap-2">
+        <a href="config.html" class="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-slate-50">Configurações</a>
+        <button id="themeBtn" class="p-2 rounded-lg border bg-white hover:bg-slate-50" title="Alternar tema">
+          <i data-lucide="sun" class="w-4 h-4"></i>
+        </button>
+        <button id="logoutBtn" class="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-slate-50">Sair</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Layout principal -->
+  <main class="max-w-screen-2xl mx-auto p-4 grid grid-cols-12 gap-4">
+    <!-- Coluna 1: Conversas -->
+    <section class="col-span-3 bg-white rounded-2xl border p-3 flex flex-col min-h-[75vh]">
+      <div class="flex items-center gap-2 mb-2">
+        <input id="searchInput" placeholder="Buscar contato..." class="w-full px-3 py-2 rounded-lg border" />
+      </div>
+      <div id="conversations" class="flex-1 overflow-auto nice-scroll space-y-1">
+        <!-- iterações aqui -->
+      </div>
+    </section>
+
+    <!-- Coluna 2: Chat -->
+    <section class="col-span-6 bg-white rounded-2xl border flex flex-col min-h-[75vh]">
+      <!-- Cabeçalho do contato -->
+      <div id="chatHeader" class="px-4 py-3 border-b flex items-center justify-between">
+        <div>
+          <div id="contactName" class="font-semibold">Selecione um contato</div>
+          <div id="contactMeta" class="text-xs text-slate-500">—</div>
         </div>
-      </aside>
+        <div class="text-xs text-slate-500" id="chatInfo">0 msgs</div>
+      </div>
 
       <!-- Mensagens -->
-      <main class="flex-1 flex flex-col">
-        <header class="p-3 border-b bg-white flex items-center gap-3">
-          <span id="conv-title">Conversa</span>
-          <button id="connect" class="ml-auto border px-3 py-1 rounded">Conectar WhatsApp</button>
-          <button id="disconnect" class="border px-3 py-1 rounded">Desconectar</button>
-        </header>
-        <div id="messages" class="flex-1 overflow-auto p-4 space-y-2">
-          <div class="text-sm text-gray-500">Selecione uma conversa para carregar as mensagens.</div>
-        </div>
-        <form id="send-form" class="p-3 border-t bg-white flex gap-2">
-          <input id="to" class="w-48 border rounded px-3 py-2" placeholder="Destinatário (ex: 55999999999)" />
-          <input id="msg" class="flex-1 border rounded px-3 py-2" placeholder="Digite uma mensagem" />
-          <button class="bg-emerald-600 text-white px-4 py-2 rounded">Enviar</button>
-        </form>
-      </main>
+      <div id="messages" class="flex-1 overflow-auto nice-scroll p-4 space-y-2 bg-slate-50">
+        <div class="text-center text-slate-400 text-sm">Nenhuma conversa aberta.</div>
+      </div>
 
-      <!-- Catálogo -->
-      <aside class="w-1/4 border-l bg-white flex flex-col">
-        <div class="p-3 border-b flex justify-between items-center">
-          <span>Catálogo</span>
-          <a class="text-sm text-emerald-700 underline" href="/config.html">Configurações</a>
+      <!-- Composer -->
+      <div class="border-t p-3 bg-white">
+        <div class="flex items-center gap-2 mb-2">
+          <button id="quickHello" class="text-xs px-3 py-1 rounded-full border hover:bg-slate-50">Olá! Posso ajudar?</button>
+          <button id="quickFrete" class="text-xs px-3 py-1 rounded-full border hover:bg-slate-50">Prazo & frete</button>
+          <button id="quickTroca" class="text-xs px-3 py-1 rounded-full border hover:bg-slate-50">Troca & devolução</button>
         </div>
-        <div class="p-3 flex gap-2">
-          <input class="flex-1 border rounded px-3 py-2" placeholder="Buscar produtos" />
-          <button class="border px-3 rounded">Buscar</button>
+        <div class="flex gap-2">
+          <input id="fileInput" type="file" class="hidden" />
+          <button id="attachBtn" class="p-2 rounded-lg border bg-white hover:bg-slate-50" title="Anexar mídia">
+            <i data-lucide="paperclip" class="w-4 h-4"></i>
+          </button>
+          <textarea id="composer" rows="2" class="flex-1 px-3 py-2 rounded-lg border" placeholder="Escreva uma mensagem... (⌘/Ctrl + Enter para enviar)"></textarea>
+          <button id="sendBtn" class="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Enviar</button>
         </div>
-        <div id="products" class="flex-1 overflow-auto p-3 space-y-2">
-          <div class="border rounded p-2">
-            <div class="font-medium">Short praiano M</div>
-            <div class="text-sm text-gray-600">R$ 149,90</div>
-            <button class="mt-1 text-sm text-emerald-700 underline">Inserir na resposta</button>
-          </div>
-        </div>
-      </aside>
+      </div>
+    </section>
+
+    <!-- Coluna 3: Catálogo -->
+    <aside class="col-span-3 bg-white rounded-2xl border p-3 flex flex-col min-h-[75vh]">
+      <div class="flex items-center gap-2 mb-2">
+        <input id="prodSearch" placeholder="Buscar produto, ex.: bermuda M" class="w-full px-3 py-2 rounded-lg border" />
+      </div>
+      <div id="catalog" class="flex-1 overflow-auto nice-scroll grid grid-cols-1 gap-3">
+        <!-- cards -->
+      </div>
+    </aside>
+  </main>
+
+  <!-- Login Overlay -->
+  <div id="loginOverlay" class="fixed inset-0 bg-white z-50 grid place-items-center p-4">
+    <div class="w-full max-w-sm bg-white border rounded-2xl p-6 shadow-sm">
+      <div class="text-center mb-4">
+        <div class="mx-auto w-12 h-12 rounded-xl bg-emerald-600 mb-3"></div>
+        <h1 class="font-semibold text-lg">Entrar</h1>
+        <p class="text-sm text-slate-600">Use seu e-mail para receber o código.</p>
+      </div>
+      <label class="block text-sm mb-1">E-mail</label>
+      <input id="emailInput" type="email" class="w-full px-3 py-2 rounded-lg border mb-3" placeholder="voce@sua-loja.com" />
+      <button id="otpBtn" class="w-full py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Enviar código</button>
+      <p id="otpStatus" class="text-xs text-slate-500 mt-3">—</p>
+      <div class="text-xs text-slate-500 mt-4">
+        Dica: defina SUPABASE_URL e SUPABASE_ANON_KEY em <a href="config.html" class="underline">Configurações</a>.
+      </div>
     </div>
-    <script>
-      let currentSessionId = null
-      let currentStoreId = null
-      let currentTo = null
-      let currentConversationId = null
-      let refreshTimer = null
+  </div>
 
-      async function api(path, opts) {
-        const cfg = await fetch('/api/config').then(r=>r.json())
-        const token = (await window.supabase.auth.getSession()).data.session?.access_token
-        const headers = { 'content-type': 'application/json' }
-        if (token) headers['authorization'] = 'Bearer ' + token
-        return fetch('/api' + path, { ...opts, headers })
+  <!-- Modal QR -->
+  <div id="qrModal" class="fixed inset-0 z-40 hidden">
+    <div class="absolute inset-0 bg-black/50"></div>
+    <div class="absolute inset-0 grid place-items-center p-4">
+      <div class="bg-white w-full max-w-lg rounded-2xl p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="font-semibold">Conectar WhatsApp</h2>
+          <button id="qrClose" class="p-1 rounded-lg border hover:bg-slate-50"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <ol class="list-decimal text-sm text-slate-600 pl-5 mb-3">
+          <li>Abra o WhatsApp &rarr; Dispositivos Conectados</li>
+          <li>Toque em “Conectar um dispositivo”</li>
+          <li>Escaneie o QR abaixo</li>
+        </ol>
+
+        <div id="qrBox" class="aspect-square w-full grid place-items-center bg-slate-100 rounded-xl overflow-hidden">
+          <div class="text-slate-500 text-sm">Gerando QR...</div>
+        </div>
+
+        <div class="mt-3 flex items-center justify-between text-sm">
+          <div class="flex items-center gap-2">
+            <span id="qrDot" class="inline-flex h-2.5 w-2.5 rounded-full bg-amber-400"></span>
+            <span id="qrStatus">Pendente</span>
+          </div>
+          <div id="qrTimer" class="text-slate-500">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-4 right-4 z-40 hidden"></div>
+
+  <script>
+    // ============ Config ============
+    const cfg = {
+      get supabaseUrl(){ return localStorage.getItem('SUPABASE_URL') || ''; },
+      get supabaseAnon(){ return localStorage.getItem('SUPABASE_ANON_KEY') || ''; },
+      get apiBase(){ return localStorage.getItem('API_BASE') || ''; }, // vazio = mesma origem
+      get storeId(){ return localStorage.getItem('STORE_ID') || ''; },
+      get away(){ return localStorage.getItem('AWAY') === '1'; },
+      set away(v){ localStorage.setItem('AWAY', v ? '1':'0'); }
+    };
+
+    // ============ Helpers ============
+    const $ = (sel)=>document.querySelector(sel);
+    const $$ = (sel)=>Array.from(document.querySelectorAll(sel));
+    const toast = (msg, type='info')=>{
+      const el = document.getElementById('toast');
+      el.innerHTML = `<div class="px-4 py-2 rounded-lg shadow bg-white border ${type==='error'?'border-rose-300':'border-slate-200'}">${msg}</div>`;
+      el.classList.remove('hidden');
+      setTimeout(()=>el.classList.add('hidden'), 2400);
+    };
+    const fmtTime = (d)=> new Date(d).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    const setSessionUI = (status)=>{
+      const dot = $('#sessionDot'); const txt = $('#sessionText');
+      const map = {connected:'bg-emerald-500', pending:'bg-amber-400', failed:'bg-rose-500'};
+      dot.className='inline-flex h-2.5 w-2.5 rounded-full '+(map[status]||'bg-amber-400');
+      txt.textContent = status.charAt(0).toUpperCase()+status.slice(1);
+    };
+    const api = (path, init={})=>{
+      const base = cfg.apiBase || '';
+      const headers = Object.assign({'Content-Type':'application/json'}, init.headers||{});
+      // Se Supabase auth existir, ele já seta Authorization automaticamente via fetch? Não.
+      // Usamos Supabase apenas para login; as rotas da API (serverless) podem checar cookies/JWT se necessário.
+      return fetch(base+path, Object.assign(init, {headers}));
+    };
+
+    // ============ Auth (Supabase OTP) ============
+    let supa = null;
+    async function ensureSupabase(){
+      if(!cfg.supabaseUrl || !cfg.supabaseAnon){
+        $('#otpStatus').textContent = 'Config faltando: defina SUPABASE_URL e SUPABASE_ANON_KEY em Configurações.';
+        return null;
       }
+      supa = supa || window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnon);
+      return supa;
+    }
+    async function handleOTP(){
+      const email = $('#emailInput').value.trim();
+      if(!email){ $('#otpStatus').textContent = 'Informe um e-mail válido.'; return; }
+      const s = await ensureSupabase(); if(!s) return;
+      $('#otpStatus').textContent = 'Enviando código...';
+      const { error } = await s.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href }});
+      if(error){ $('#otpStatus').textContent = 'Erro: '+error.message; return; }
+      $('#otpStatus').textContent = 'Código enviado. Verifique seu e-mail.';
+    }
+    async function checkSession(){
+      const s = await ensureSupabase(); if(!s) return false;
+      const { data } = await s.auth.getSession();
+      const ok = !!data.session;
+      $('#loginOverlay').classList.toggle('hidden', ok);
+      return ok;
+    }
 
-      window.initApp = async function initApp() {
-        await loadStores()
-      }
-
-      async function loadStores() {
-        const { data, error } = await window.supabase.from('stores').select('id, name').order('name')
-        const sel = document.getElementById('store-select')
-        sel.innerHTML = ''
-        if (error) {
-          sel.innerHTML = `<option>Erro ao carregar lojas</option>`
-          return
-        }
-        if (!data || data.length === 0) {
-          sel.innerHTML = `<option>Nenhuma loja</option>`
-          return
-        }
-        sel.innerHTML = data.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')
-        currentStoreId = data[0].id
-        sel.value = currentStoreId
-        sel.onchange = () => { currentStoreId = sel.value; loadConversations(); loadProducts(); }
-        await loadConversations()
-        await loadProducts()
-      }
-
-      async function loadConversations() {
-        const list = document.getElementById('conversations')
-        list.innerHTML = '<div class="p-3 text-sm text-gray-500">Carregando…</div>'
-        const { data, error } = await window.supabase
-          .from('conversations')
-          .select('id, last_message_at, contact_id, contacts:contact_id ( name, phone )')
-          .eq('store_id', currentStoreId)
-          .order('last_message_at', { ascending: false })
-        if (error) {
-          list.innerHTML = `<div class="p-3 text-sm text-red-600">Erro: ${error.message}</div>`
-          return
-        }
-        if (!data || data.length === 0) {
-          list.innerHTML = '<div class="p-3 text-sm text-gray-500">Sem conversas ainda.</div>'
-          return
-        }
-        list.innerHTML = ''
-        data.forEach(c => {
-          const el = document.createElement('div')
-          el.className = 'p-3 hover:bg-gray-100 cursor-pointer border-b'
-          const name = c.contacts?.name || c.contacts?.phone || 'Sem nome'
-          const when = c.last_message_at ? new Date(c.last_message_at).toLocaleString() : '-'
-          el.innerHTML = `<div class="flex justify-between"><span>${name}</span><span class="text-xs text-gray-500">${when}</span></div>`
-          el.addEventListener('click', () => selectConversation(c))
-          list.appendChild(el)
-        })
-      }
-
-      async function selectConversation(conv) {
-        currentConversationId = conv.id
-        currentTo = (conv.contacts && conv.contacts.phone) || null
-        document.getElementById('to').value = currentTo || ''
-        document.getElementById('conv-title').textContent = conv.contacts?.name || conv.contacts?.phone || 'Conversa'
-        await loadMessages()
-        if (refreshTimer) clearInterval(refreshTimer)
-        refreshTimer = setInterval(loadMessages, 4000)
-      }
-
-      async function loadMessages() {
-        const box = document.getElementById('messages')
-        if (!currentConversationId) return
-        const { data, error } = await window.supabase
-          .from('messages')
-          .select('id, direction, type, content, media_url, created_at')
-          .eq('conversation_id', currentConversationId)
-          .order('created_at', { ascending: true })
-        if (error) {
-          box.innerHTML = `<div class="p-3 text-sm text-red-600">Erro: ${error.message}</div>`
-          return
-        }
-        box.innerHTML = ''
-        data.forEach(m => {
-          const div = document.createElement('div')
-          const mine = m.direction === 'out'
-          div.className = 'max-w-md border rounded p-2 ' + (mine ? 'bg-emerald-50 border-emerald-200 self-end ml-auto' : 'bg-white')
-          if (m.type === 'text' || !m.type) {
-            div.textContent = m.content || ''
-          } else if (m.type === 'image' && m.media_url) {
-            const img = document.createElement('img'); img.src = m.media_url; img.className = 'max-w-xs rounded'; div.appendChild(img)
-            if (m.content) { const p = document.createElement('div'); p.textContent = m.content; div.appendChild(p) }
-          } else {
-            div.textContent = m.content || '[mensagem]'
-          }
-          box.appendChild(div)
-        })
-        box.scrollTop = box.scrollHeight
-      }
-
-      async function loadProducts() {
-        const grid = document.getElementById('products')
-        if (!currentStoreId) return
-        const { data, error } = await window.supabase
-          .from('products')
-          .select('id, name, price, description')
-          .eq('store_id', currentStoreId)
-          .order('created_at', { ascending: false })
-        if (error) {
-          grid.innerHTML = `<div class="p-3 text-sm text-red-600">Erro: ${error.message}</div>`
-          return
-        }
-        grid.innerHTML = ''
-        data.forEach(p => {
-          const el = document.createElement('div')
-          el.className = 'border rounded p-2'
-          el.innerHTML = `<div class="font-medium">${p.name}</div><div class="text-sm text-gray-600">R$ ${Number(p.price).toFixed(2)}</div>`
-          const btn = document.createElement('button')
-          btn.className = 'mt-1 text-sm text-emerald-700 underline'
-          btn.textContent = 'Inserir na resposta'
-          btn.addEventListener('click', () => {
-            const input = document.getElementById('msg')
-            input.value = (input.value ? input.value + ' ' : '') + `${p.name} por R$ ${Number(p.price).toFixed(2)}`
-            input.focus()
-          })
-          el.appendChild(btn)
-          grid.appendChild(el)
-        })
-      }
-
-      document.getElementById('send-form')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const input = document.getElementById('msg');
-        const toInput = document.getElementById('to');
-        if (!input || !input.value) return;
-        currentTo = toInput?.value || currentTo
-        if (!currentSessionId || !currentStoreId || !currentTo) {
-          alert('Configure sessão, loja e destinatário.');
-          return;
-        }
-        await api('/send', { method: 'POST', body: JSON.stringify({
-          session_id: currentSessionId,
-          store_id: currentStoreId,
-          to: currentTo,
-          text: input.value
-        }) })
-        const div = document.createElement('div');
-        div.className = 'max-w-md bg-emerald-50 border border-emerald-200 rounded p-2 self-end ml-auto';
-        div.textContent = input.value;
-        document.getElementById('messages')?.appendChild(div);
-        input.value = '';
-        // Refresh messages after short delay
-        setTimeout(loadMessages, 1000)
+    // ============ Conversas (lista mínima com contacts) ============
+    let state = { contact: null, messages: [] };
+    async function loadContacts(q=''){
+      const url = '/api/contacts'+(q?`?q=${encodeURIComponent(q)}`:'');
+      const r = await api(url);
+      if(!r.ok){ toast('Erro ao carregar contatos','error'); return; }
+      const list = await r.json(); // [{id,name,phone,last_interaction_at,...}]
+      const wrap = $('#conversations');
+      wrap.innerHTML = '';
+      list.forEach(c=>{
+        const li = document.createElement('button');
+        li.className = 'w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 border';
+        li.innerHTML = `
+          <div class="flex items-center justify-between">
+            <div class="font-medium line-clamp-1">${c.name||c.phone||'Sem nome'}</div>
+            <div class="text-xs text-slate-500">${c.last_interaction_at?fmtTime(c.last_interaction_at):''}</div>
+          </div>
+          <div class="text-xs text-slate-500 line-clamp-1">${c.wa_id||c.phone||''}</div>
+        `;
+        li.onclick = ()=>openContact(c);
+        wrap.appendChild(li);
       });
+    }
+    function renderMessages(){
+      const box = $('#messages'); box.innerHTML='';
+      if(!state.contact){
+        box.innerHTML = `<div class="text-center text-slate-400 text-sm">Selecione um contato.</div>`;
+        $('#chatHeader #contactName').textContent = 'Selecione um contato';
+        $('#contactMeta').textContent = '—';
+        $('#chatInfo').textContent = '0 msgs';
+        return;
+      }
+      $('#chatHeader #contactName').textContent = state.contact.name||state.contact.phone||'Contato';
+      $('#contactMeta').textContent = state.contact.phone?`Telefone: ${state.contact.phone}`:'';
+      state.messages.forEach(m=>{
+        const isOut = m.direction==='out';
+        const row = document.createElement('div');
+        row.className = `flex ${isOut?'justify-end':''}`;
+        row.innerHTML = `
+          <div class="max-w-[75%] rounded-2xl px-3 py-2 text-sm ${isOut?'bg-emerald-600 text-white':'bg-white border'}">
+            <div>${m.content||''}</div>
+            <div class="text-[10px] opacity-70 mt-1 text-right">${fmtTime(m.created_at||Date.now())}</div>
+          </div>`;
+        box.appendChild(row);
+      });
+      box.scrollTop = box.scrollHeight;
+      $('#chatInfo').textContent = `${state.messages.length} msgs`;
+    }
+    async function openContact(c){
+      state.contact = c;
+      state.messages = []; // no MVP: carregue do backend quando seu /api/messages existir
+      renderMessages();
+    }
 
-      document.getElementById('connect')?.addEventListener('click', async () => {
-        if (!currentStoreId) { alert('Selecione uma loja primeiro.'); return }
-        const r = await api('/sessions/create', { method: 'POST', body: JSON.stringify({ store_id: currentStoreId }) })
-        const j = await r.json()
-        currentSessionId = j.session_id
-        // Abrir SSE do QR
-        const es = new EventSource(`/api/sessions/qr?session_id=${currentSessionId}`)
-        es.addEventListener('qr', (ev) => {
-          const data = JSON.parse(ev.data)
-          const img = document.getElementById('qr') || (()=>{ const i=document.createElement('img'); i.id='qr'; i.className='absolute top-3 right-3 w-64 border'; document.body.appendChild(i); return i })()
-          img.src = `data:image/png;base64,${data.qr_base64}`
-        })
-        es.addEventListener('connected', () => {
-          const img = document.getElementById('qr'); if (img) img.remove()
-          alert('Sessão conectada!')
-        })
-      })
+    // ============ Catálogo ============
+    async function loadProducts(q=''){
+      const url = '/api/products'+(q?`?q=${encodeURIComponent(q)}`:'');
+      const r = await api(url);
+      if(!r.ok){ toast('Erro ao carregar produtos','error'); return; }
+      const items = await r.json();
+      const wrap = $('#catalog'); wrap.innerHTML='';
+      if(!items.length){
+        wrap.innerHTML = `<div class="text-sm text-slate-500">Sem produtos.</div>`;
+        return;
+      }
+      items.forEach(p=>{
+        const el = document.createElement('div');
+        el.className = 'border rounded-xl p-3';
+        const price = (Number(p.price||0)).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+        const img = (p.images && p.images[0]) ? `<img src="${p.images[0]}" class="w-full h-28 object-cover rounded-lg mb-2" />` : `<div class="w-full h-28 bg-slate-100 rounded-lg mb-2 grid place-items-center text-slate-400 text-xs">sem imagem</div>`;
+        el.innerHTML = `
+          ${img}
+          <div class="font-medium line-clamp-1">${p.name}</div>
+          <div class="text-xs text-slate-500">${p.category||''}</div>
+          <div class="text-sm mt-1">${price}</div>
+          <div class="mt-2 flex gap-2">
+            <button class="px-3 py-1.5 text-sm rounded-lg border hover:bg-slate-50">Inserir na resposta</button>
+          </div>
+        `;
+        el.querySelector('button').onclick = ()=>{
+          const existing = $('#composer').value;
+          $('#composer').value = (existing?existing+'\n':'')+`${p.name} — ${price}`;
+          $('#composer').focus();
+        };
+        wrap.appendChild(el);
+      });
+    }
 
-      document.getElementById('disconnect')?.addEventListener('click', async () => {
-        if (!currentSessionId) return
-        await api('/sessions/disconnect', { method: 'POST', body: JSON.stringify({ session_id: currentSessionId }) })
-        alert('Sessão marcada como desconectada')
-      })
-    </script>
-  </body>
-  </html>
+    // ============ Envio ============
+    async function sendMessage(){
+      if(!state.contact){ toast('Selecione um contato','error'); return; }
+      const text = $('#composer').value.trim();
+      if(!text){ return; }
+      const body = { to: state.contact.phone || state.contact.wa_id, text, store_id: cfg.storeId };
+      const r = await api('/api/send',{ method:'POST', body: JSON.stringify(body) });
+      if(!r.ok){ toast('Falha ao enfileirar mensagem','error'); return; }
+      // Otimismo visual
+      state.messages.push({ direction:'out', content:text, created_at: Date.now() });
+      $('#composer').value = '';
+      renderMessages();
+    }
+
+    // ============ QR / Sessão ============
+    let qrTimerInt = null, qrPollInt = null, currentSessionId = null, qrSeconds = 60;
+    function openQR(){
+      $('#qrModal').classList.remove('hidden');
+      $('#qrBox').innerHTML = `<div class="text-slate-500 text-sm">Gerando QR...</div>`;
+      $('#qrStatus').textContent = 'Pendente'; $('#qrDot').className='inline-flex h-2.5 w-2.5 rounded-full bg-amber-400';
+      $('#qrTimer').textContent = '60s';
+      qrSeconds = 60;
+      // criar sessão
+      api('/api/sessions/create', { method: 'POST', body: JSON.stringify({ store_id: cfg.storeId }) })
+      .then(r=>r.json()).then(d=>{
+        currentSessionId = d.session_id;
+        if(d.qr){
+          const img = new Image();
+          img.src = d.qr;
+          img.className = 'w-64 h-64 object-contain';
+          $('#qrBox').innerHTML = '';
+          $('#qrBox').appendChild(img);
+        } else {
+          $('#qrBox').innerHTML = `<div class="text-rose-500 text-sm">QR não recebido.</div>`;
+        }
+        // timer
+        clearInterval(qrTimerInt);
+        qrTimerInt = setInterval(()=>{
+          qrSeconds--; if(qrSeconds<=0){ clearInterval(qrTimerInt); } 
+          $('#qrTimer').textContent = `${Math.max(0,qrSeconds)}s`;
+        }, 1000);
+        // polling status
+        clearInterval(qrPollInt);
+        qrPollInt = setInterval(async ()=>{
+          const rs = await api(`/api/sessions/status?session_id=${encodeURIComponent(currentSessionId)}`);
+          if(!rs.ok) return;
+          const st = await rs.json(); // {status: 'connected'|'pending'|'failed'}
+          setSessionUI(st.status || 'pending');
+          $('#qrStatus').textContent = (st.status||'pending');
+          const map = {connected:'bg-emerald-500', pending:'bg-amber-400', failed:'bg-rose-500'};
+          $('#qrDot').className = 'inline-flex h-2.5 w-2.5 rounded-full '+(map[st.status]||'bg-amber-400');
+          if(st.status==='connected'){
+            clearInterval(qrPollInt); clearInterval(qrTimerInt);
+            toast('WhatsApp conectado!');
+            $('#qrModal').classList.add('hidden');
+          }
+        }, 2000);
+      }).catch(()=>{
+        $('#qrBox').innerHTML = `<div class="text-rose-500 text-sm">Erro ao criar sessão.</div>`;
+      });
+    }
+
+    // ============ Tema ============
+    let dark=false;
+    function toggleTheme(){
+      dark = !dark;
+      document.documentElement.classList.toggle('dark', dark);
+      document.body.classList.toggle('bg-slate-900', dark);
+      document.body.classList.toggle('text-slate-100', dark);
+      $('#themeBtn').innerHTML = dark ? '<i data-lucide="moon" class="w-4 h-4"></i>' : '<i data-lucide="sun" class="w-4 h-4"></i>';
+      lucide.createIcons();
+    }
+
+    // ============ Init ============
+    async function init(){
+      lucide.createIcons();
+      // bind UI
+      $('#otpBtn').onclick = handleOTP;
+      $('#logoutBtn').onclick = async ()=>{
+        if(supa){ await supa.auth.signOut(); }
+        location.reload();
+      };
+      $('#btnConnect').onclick = openQR;
+      $('#qrClose').onclick = ()=>$('#qrModal').classList.add('hidden');
+      $('#themeBtn').onclick = toggleTheme;
+      $('#quickHello').onclick = ()=>{ $('#composer').value = 'Olá! Posso ajudar?'; };
+      $('#quickFrete').onclick = ()=>{ $('#composer').value = 'Qual seu CEP? Verifico frete e prazo pra você.'; };
+      $('#quickTroca').onclick = ()=>{ $('#composer').value = 'Nossas trocas podem ser feitas em até 30 dias com etiqueta.'; };
+      $('#sendBtn').onclick = sendMessage;
+      $('#composer').addEventListener('keydown', (e)=>{ if((e.metaKey||e.ctrlKey) && e.key==='Enter'){ sendMessage(); }});
+      $('#attachBtn').onclick = ()=>$('#fileInput').click();
+      $('#searchInput').addEventListener('input', (e)=>loadContacts(e.target.value));
+      $('#prodSearch').addEventListener('input', (e)=>loadProducts(e.target.value));
+
+      // away toggle
+      $('#awayToggle').checked = cfg.away;
+      $('#awayToggle').onchange = async (e)=>{
+        cfg.away = e.target.checked;
+        toast(cfg.away?'Modo Ausente ligado':'Modo Ausente desligado');
+        // opcional: persistir no backend: await api('/api/stores',{method:'PUT', body: JSON.stringify({away:true/false})});
+      };
+
+      // nome da loja (somente visual; ideal: buscar em /api/stores)
+      $('#storeNameTop').textContent = cfg.storeId ? `Loja #${cfg.storeId.slice(0,8)}` : 'Loja não definida';
+      
+      // auth
+      const ok = await checkSession();
+      if(!ok){ return; } // mantém overlay de login
+
+      // carregar listas
+      loadContacts();
+      loadProducts();
+
+      // estado inicial sessão
+      setSessionUI('pending');
+    }
+
+    init();
+  </script>
+</body>
+</html>
