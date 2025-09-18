@@ -32,6 +32,31 @@ export function requireAuth() {
   }
 }
 
+/**
+ * Helper para uso direto dentro de handlers serverless (sem registrar middleware Express).
+ * Retorna o usuário ou null (não lança). Usa o mesmo cache leve de requireAuth().
+ */
+export async function getUserFromAuthHeader(req: any): Promise<any | null> {
+  try {
+    const auth = req.headers?.authorization
+    if (!auth?.startsWith('Bearer ')) return null
+    const token = auth.substring('Bearer '.length).trim()
+    if (!token) return null
+    const now = Date.now()
+    const cached = userCache.get(token)
+    if (cached && cached.exp > now) return cached.user
+    const sb = supabaseServer()
+    const { data, error } = await sb.auth.getUser(token)
+    if (error || !data.user) return null
+    const exp = (data.user as any)?.exp ? (data.user as any).exp * 1000 : (now + CACHE_TTL_MS)
+    if (exp < now) return null
+    userCache.set(token, { user: data.user, exp: now + CACHE_TTL_MS })
+    return data.user
+  } catch {
+    return null
+  }
+}
+
 export async function assertStoreOwnership(userId: string, storeId: string) {
   const sb = supabaseService()
   const { data, error } = await sb
