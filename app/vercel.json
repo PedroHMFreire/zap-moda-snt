@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "outputDirectory": "web",
+  "functions": {
+    "api/**/*.ts": { "runtime": "nodejs20.x", "maxDuration": 10, "memory": 1024 },
+    "api/**/*.js": { "runtime": "nodejs20.x", "maxDuration": 10, "memory": 1024 }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" }
+  ]
+}
