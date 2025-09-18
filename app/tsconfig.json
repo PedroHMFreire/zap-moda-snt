@@ -10,5 +10,5 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["api/**/*.ts", "lib/**/*.ts"]
+  "include": ["api/**/*.ts", "lib/**/*.ts", "server/routes/index.ts", "server/routes/bootstrap.ts", "server/routes/status.ts", "server/routes/qr.ts", "server/routes/disconnect.ts", "server/routes/create.ts", "server/routes/contacts.ts", "server/routes/config.ts", "server/routes/reply.ts", "server/routes/products.ts", "server/routes/send.ts", "server/routes/index.ts"]
 }
