@@ -127,7 +127,7 @@
       <button id="otpBtn" class="w-full py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Enviar código</button>
       <p id="otpStatus" class="text-xs text-slate-500 mt-3">—</p>
       <div class="text-xs text-slate-500 mt-4">
-        Dica: defina SUPABASE_URL e SUPABASE_ANON_KEY em <a href="config.html" class="underline">Configurações</a>.
+        Dica: você pode ajustar manualmente em <a href="config.html" class="underline">Configurações</a>.
       </div>
     </div>
   </div>
@@ -166,6 +166,42 @@
   <div id="toast" class="fixed bottom-4 right-4 z-40 hidden"></div>
 
   <script>
+    // ============ Auto-config ============
+    async function loadConfig() {
+      // 1) tenta localStorage
+      const ls = (k) => localStorage.getItem(k) || "";
+      let SUPABASE_URL  = ls("SUPABASE_URL");
+      let SUPABASE_ANON = ls("SUPABASE_ANON_KEY");
+      let API_BASE      = ls("API_BASE");
+      let STORE_ID      = ls("STORE_ID");
+
+      // 2) se faltar algo, busca /api/config
+      if (!SUPABASE_URL || !SUPABASE_ANON || !STORE_ID) {
+        try {
+          const r = await fetch("/api/config");
+          if (r.ok) {
+            const cfg = await r.json();
+            SUPABASE_URL  = SUPABASE_URL  || cfg.SUPABASE_URL  || "";
+            SUPABASE_ANON = SUPABASE_ANON || cfg.SUPABASE_ANON_KEY || "";
+            API_BASE      = API_BASE      || cfg.API_BASE || "";
+            STORE_ID      = STORE_ID      || cfg.STORE_ID || "";
+            if (SUPABASE_URL)  localStorage.setItem("SUPABASE_URL", SUPABASE_URL);
+            if (SUPABASE_ANON) localStorage.setItem("SUPABASE_ANON_KEY", SUPABASE_ANON);
+            if (API_BASE)      localStorage.setItem("API_BASE", API_BASE);
+            if (STORE_ID)      localStorage.setItem("STORE_ID", STORE_ID);
+          }
+        } catch (e) {
+          console.warn("Falha ao obter /api/config", e);
+        }
+      }
+
+      // 3) avisa na UI se ainda estiver faltando
+      if (!SUPABASE_URL || !SUPABASE_ANON) {
+        const st = document.getElementById('otpStatus');
+        if (st) st.textContent = 'Config ausente. Defina SUPABASE_URL e SUPABASE_ANON_KEY em /config ou via /api/config.';
+      }
+    }
+
     // ============ Config ============
     const cfg = {
       get supabaseUrl(){ return localStorage.getItem('SUPABASE_URL') || ''; },
@@ -195,8 +231,6 @@
     const api = (path, init={})=>{
       const base = cfg.apiBase || '';
       const headers = Object.assign({'Content-Type':'application/json'}, init.headers||{});
-      // Se Supabase auth existir, ele já seta Authorization automaticamente via fetch? Não.
-      // Usamos Supabase apenas para login; as rotas da API (serverless) podem checar cookies/JWT se necessário.
       return fetch(base+path, Object.assign(init, {headers}));
     };
 
@@ -204,7 +238,7 @@
     let supa = null;
     async function ensureSupabase(){
       if(!cfg.supabaseUrl || !cfg.supabaseAnon){
-        $('#otpStatus').textContent = 'Config faltando: defina SUPABASE_URL e SUPABASE_ANON_KEY em Configurações.';
+        $('#otpStatus').textContent = 'Config faltando: defina SUPABASE_URL e SUPABASE_ANON_KEY.';
         return null;
       }
       supa = supa || window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnon);
@@ -227,13 +261,13 @@
       return ok;
     }
 
-    // ============ Conversas (lista mínima com contacts) ============
+    // ============ Conversas ============
     let state = { contact: null, messages: [] };
     async function loadContacts(q=''){
       const url = '/api/contacts'+(q?`?q=${encodeURIComponent(q)}`:'');
       const r = await api(url);
       if(!r.ok){ toast('Erro ao carregar contatos','error'); return; }
-      const list = await r.json(); // [{id,name,phone,last_interaction_at,...}]
+      const list = await r.json();
       const wrap = $('#conversations');
       wrap.innerHTML = '';
       list.forEach(c=>{
@@ -277,7 +311,7 @@
     }
     async function openContact(c){
       state.contact = c;
-      state.messages = []; // no MVP: carregue do backend quando seu /api/messages existir
+      state.messages = []; // futuro: carregar do backend
       renderMessages();
     }
 
@@ -332,6 +366,7 @@
     // ============ QR / Sessão ============
     let qrTimerInt = null, qrPollInt = null, currentSessionId = null, qrSeconds = 60;
     function openQR(){
+      if(!cfg.storeId){ toast('Defina STORE_ID em /api/config ou /config','error'); return; }
       $('#qrModal').classList.remove('hidden');
       $('#qrBox').innerHTML = `<div class="text-slate-500 text-sm">Gerando QR...</div>`;
       $('#qrStatus').textContent = 'Pendente'; $('#qrDot').className='inline-flex h-2.5 w-2.5 rounded-full bg-amber-400';
@@ -391,6 +426,10 @@
     // ============ Init ============
     async function init(){
       lucide.createIcons();
+
+      // carrega config automática (localStorage ou /api/config)
+      await loadConfig();
+
       // bind UI
       $('#otpBtn').onclick = handleOTP;
       $('#logoutBtn').onclick = async ()=>{
@@ -414,12 +453,11 @@
       $('#awayToggle').onchange = async (e)=>{
         cfg.away = e.target.checked;
         toast(cfg.away?'Modo Ausente ligado':'Modo Ausente desligado');
-        // opcional: persistir no backend: await api('/api/stores',{method:'PUT', body: JSON.stringify({away:true/false})});
       };
 
-      // nome da loja (somente visual; ideal: buscar em /api/stores)
+      // nome da loja (placeholder visual)
       $('#storeNameTop').textContent = cfg.storeId ? `Loja #${cfg.storeId.slice(0,8)}` : 'Loja não definida';
-      
+
       // auth
       const ok = await checkSession();
       if(!ok){ return; } // mantém overlay de login

@@ -69,7 +69,8 @@ function decryptIfPossible(data: ArrayBuffer | Buffer | string): Buffer {
   let buf: Buffer;
   if (typeof data === 'string') buf = Buffer.from(data, 'utf8');
   else if (data instanceof Buffer) buf = data;
-  else buf = Buffer.from(data);
+  else if (data instanceof ArrayBuffer) buf = Buffer.from(new Uint8Array(data));
+  else buf = Buffer.from(data as Buffer);
 
   if (!isEncPayload(buf)) return buf;
 
