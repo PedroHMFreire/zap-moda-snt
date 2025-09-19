@@ -266,7 +266,26 @@
           await new Promise(r=>setTimeout(r, 600));
           return afterLogin(retry+1);
         }
-        $('#authStatus').textContent = 'Store não pronta. Recarregue depois.';
+        // fallback: chama ensure no backend para criar
+        $('#authStatus').textContent = 'Garantindo store...';
+        try {
+          const { data: sessionData } = await s.auth.getSession();
+          const token = sessionData?.session?.access_token;
+          if (token) {
+            const r = await fetch('/api/stores/ensure', { method:'POST', headers:{ 'Authorization': 'Bearer '+token } });
+            if (r.ok) {
+              const j = await r.json();
+              cfg.storeId = j.store_id;
+              $('#storeNameTop').textContent = `Loja #${j.store_id.slice(0,8)}`;
+              $('#loginOverlay').classList.add('hidden');
+              await initData();
+              return;
+            }
+          }
+          $('#authStatus').textContent = 'Falha ao garantir store.';
+        } catch(e){
+          $('#authStatus').textContent = 'Erro ao criar store.';
+        }
         return;
       }
       cfg.storeId = store.id;
