@@ -35,6 +35,25 @@ Workers (Railway/Render/Fly):
 - MAX_SESSIONS_PER_NODE (ex.: 50)
 - QUEUE_DB_URL
 
+### Arquivos de exemplo (.env.example)
+- Na raiz: `.env.example` (API + variáveis comuns)
+- Em `workers/session-node/.env.example` (apenas o necessário ao worker)
+
+Como usar no desenvolvimento:
+1. Copie cada arquivo para `.env.local` (raiz) e `workers/session-node/.env.local`.
+2. Preencha valores reais.
+3. NÃO commit chaves reais.
+
+Produção:
+- Configure as variáveis do APP no painel da Vercel.
+- Configure as variáveis do WORKER no provedor onde ele roda (Docker/Render/Railway/Fly). NÃO use o domínio do worker como `PUBLIC_API_BASE` no frontend.
+
+Separação crítica:
+- `SUPABASE_ANON_KEY`: pode ser exposta via `/api/config` para o frontend.
+- `SUPABASE_SERVICE_ROLE`: somente backend/worker (nunca no navegador).
+- Worker precisa de `SUPABASE_SERVICE_ROLE` para atualizar `whatsapp_sessions.last_qr` sob RLS.
+- `PUBLIC_API_BASE` deve apontar para o domínio que serve `api/index.ts` (ou ficar vazio se front hospeda no mesmo domínio). Não usar o domínio “session-node”.
+
 3) Instalação
 
 Na raiz do projeto:

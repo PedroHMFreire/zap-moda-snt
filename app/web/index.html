@@ -398,15 +398,23 @@
           const rs = await api(`/api/sessions/status?session_id=${encodeURIComponent(currentSessionId)}`, { headers: hdr2 });
           if(!rs.ok) return;
           const st = await rs.json();
-            setSessionUI(st.status || 'pending');
-            document.getElementById('qrStatus').textContent = (st.status||'pending');
-            const map = {connected:'bg-emerald-500', pending:'bg-amber-400', failed:'bg-rose-500'};
-            document.getElementById('qrDot').className = 'inline-flex h-2.5 w-2.5 rounded-full '+(map[st.status]||'bg-amber-400');
-            if(st.status==='connected'){
-              clearInterval(qrPollInt); clearInterval(qrTimerInt);
-              toast('WhatsApp conectado!');
-              document.getElementById('qrModal').classList.add('hidden');
+          setSessionUI(st.status || 'pending');
+          document.getElementById('qrStatus').textContent = (st.status||'pending');
+          const map = {connected:'bg-emerald-500', pending:'bg-amber-400', failed:'bg-rose-500'};
+          document.getElementById('qrDot').className = 'inline-flex h-2.5 w-2.5 rounded-full '+(map[st.status]||'bg-amber-400');
+          // NOVO: atualizar imagem do QR assim que estiver disponível
+          if(st.last_qr){
+            const box = document.getElementById('qrBox');
+            if(!box.querySelector('img')){
+              const img = new Image(); img.src = st.last_qr; img.className='w-64 h-64 object-contain';
+              box.innerHTML=''; box.appendChild(img);
             }
+          }
+          if(st.status==='connected'){
+            clearInterval(qrPollInt); clearInterval(qrTimerInt);
+            toast('WhatsApp conectado!');
+            document.getElementById('qrModal').classList.add('hidden');
+          }
         }, 2000);
       } catch(e){
         document.getElementById('qrBox').innerHTML = `<div class="text-rose-500 text-sm">Erro ao criar sessão.</div>`;

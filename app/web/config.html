@@ -75,6 +75,7 @@
       $('#supabaseAnon').value = cfg.supabaseAnon;
       $('#apiBase').value = cfg.apiBase;
       $('#awayMsg').value = cfg.awayMsg;
+      validateApiBase();
     }
 
     function save(){
@@ -82,6 +83,22 @@
       cfg.supabaseAnon = $('#supabaseAnon').value.trim();
       cfg.apiBase = $('#apiBase').value.trim();
       $('#status').textContent = 'Configurações salvas!';
+      validateApiBase();
+    }
+
+    function validateApiBase(){
+      const val = $('#apiBase').value.trim();
+      const input = $('#apiBase');
+      if(!val){
+        input.classList.remove('border-rose-400','bg-rose-50');
+        return;
+      }
+      if(/session-node/i.test(val)){
+        input.classList.add('border-rose-400','bg-rose-50');
+        $('#status').textContent = 'ATENÇÃO: este domínio parece ser do worker (session-node) e não expõe as rotas /api. Use o domínio principal do app ou deixe vazio se estiver no mesmo domínio.';
+      } else {
+        input.classList.remove('border-rose-400','bg-rose-50');
+      }
     }
 
     async function test(){
