@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Minimal • Supabase</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body{font-family:system-ui,Arial,sans-serif;margin:0;padding:2rem;background:#f6f7f9;color:#111}
+    h1{margin-top:0;font-size:1.25rem}
+    input,button,textarea{font:inherit}
+    input,button{padding:.55rem .8rem;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+    button{cursor:pointer;background:#0d9488;color:#fff;border:1px solid #0d9488}
+    button:hover{background:#0f766e}
+    .row{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem}
+    #log{font-size:.75rem;white-space:pre-wrap;background:#111;color:#f1f5f9;padding:1rem;border-radius:8px;max-height:220px;overflow:auto}
+    #lists{display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1rem}
+    .panel{background:#fff;padding:1rem;border:1px solid #e2e8f0;border-radius:10px;flex:1;min-width:260px}
+    .items{font-size:.8rem;line-height:1.2;border-top:1px solid #e2e8f0;margin-top:.5rem;padding-top:.5rem;max-height:200px;overflow:auto}
+    small{color:#64748b}
+  </style>
+</head>
+<body>
+  <h1>Minimal Supabase Demo</h1>
+  <p style="max-width:600px">Exemplo mínimo: autenticação, listar/ inserir contatos e mensagens diretamente via Supabase JS (sem API intermediária). Edite SUPABASE_URL e ANON abaixo e clique salvar.</p>
+
+  <div class="row">
+    <input id="supabaseUrl" placeholder="SUPABASE_URL" size="38" />
+    <input id="supabaseAnon" placeholder="SUPABASE_ANON_KEY" size="42" />
+    <button id="saveEnv">Salvar</button>
+  </div>
+  <div class="row">
+    <input id="email" placeholder="email" />
+    <input id="password" placeholder="senha" type="password" />
+    <button id="signup">Criar Conta</button>
+    <button id="signin">Entrar</button>
+    <button id="signout">Sair</button>
+    <button id="whoami">Sessão?</button>
+  </div>
+
+  <div class="row">
+    <button id="loadContacts">Carregar Contatos</button>
+    <input id="newContactName" placeholder="Nome contato" />
+    <input id="newContactPhone" placeholder="Telefone" />
+    <button id="addContact">Adicionar Contato</button>
+  </div>
+  <div class="row">
+    <input id="messageTo" placeholder="Fone destino (wa/phone)" />
+    <input id="messageText" placeholder="Mensagem" size="40" />
+    <button id="sendMessage">Inserir Mensagem</button>
+  </div>
+  <div class="row">
+    <button id="loadMessages">Carregar Mensagens</button>
+  </div>
+
+  <div id="lists">
+    <div class="panel">
+      <strong>Contatos</strong><br><small id="contactsMeta">—</small>
+      <div id="contacts" class="items"></div>
+    </div>
+    <div class="panel">
+      <strong>Mensagens</strong><br><small id="messagesMeta">—</small>
+      <div id="messages" class="items"></div>
+    </div>
+  </div>
+
+  <h3>Log</h3>
+  <div id="log">(vazio)</div>
+
+<script>
+const $ = s=>document.querySelector(s);
+const log = (...a)=>{ const el=$('#log'); el.textContent += a.map(x=>typeof x==='object'?JSON.stringify(x,null,2):x).join(' ')+'\n'; el.scrollTop=el.scrollHeight; };
+
+function loadLocal(){
+  $('#supabaseUrl').value = localStorage.getItem('M_SUPA_URL')||'';
+  $('#supabaseAnon').value = localStorage.getItem('M_SUPA_ANON')||'';
+}
+
+function saveLocal(){
+  localStorage.setItem('M_SUPA_URL', $('#supabaseUrl').value.trim());
+  localStorage.setItem('M_SUPA_ANON', $('#supabaseAnon').value.trim());
+  log('Config salva.');
+  initClient(true);
+}
+
+let supa = null;
+function initClient(force){
+  const url = $('#supabaseUrl').value.trim();
+  const anon = $('#supabaseAnon').value.trim();
+  if(!url||!anon){ log('Defina SUPABASE_URL e ANON.'); return; }
+  if(supa && !force) return;
+  supa = window.supabase.createClient(url, anon);
+  log('Cliente Supabase pronto.');
+}
+
+async function signup(){
+  initClient(); if(!supa) return;
+  const { data, error } = await supa.auth.signUp({ email:$('#email').value, password:$('#password').value });
+  if(error) return log('signup erro', error.message);
+  log('signup ok', data.user?.id);
+}
+
+async function signin(){
+  initClient(); if(!supa) return;
+  const { data, error } = await supa.auth.signInWithPassword({ email:$('#email').value, password:$('#password').value });
+  if(error) return log('signin erro', error.message);
+  log('signin ok');
+}
+
+async function signout(){ if(!supa) return; await supa.auth.signOut(); log('logout ok'); }
+async function whoami(){ if(!supa) return; const { data } = await supa.auth.getSession(); log('session', data.session? 'ATIVA':'NENHUMA'); }
+
+async function loadContacts(){ initClient(); if(!supa) return;
+  const { data, error } = await supa.from('contacts').select('*').order('updated_at',{ascending:false}).limit(50);
+  if(error) return log('contatos erro', error.message);
+  $('#contacts').innerHTML = data.map(c=>`<div>${c.name||'(sem nome)'} <small>${c.phone||''}</small></div>`).join('');
+  $('#contactsMeta').textContent = data.length+' itens';
+  log('contatos ok', data.length);
+}
+
+async function addContact(){ initClient(); if(!supa) return;
+  const name=$('#newContactName').value.trim(); const phone=$('#newContactPhone').value.trim();
+  if(!name && !phone) return log('Informe nome ou telefone');
+  const { data: sess } = await supa.auth.getSession();
+  if(!sess.session) return log('Precisa estar logado');
+  // owner_id deve ser inferido via RLS = auth.uid(), então não enviamos.
+  const { error } = await supa.from('contacts').insert({ name, phone });
+  if(error) return log('add contato erro', error.message);
+  log('contato inserido'); loadContacts();
+}
+
+async function sendMessage(){ initClient(); if(!supa) return;
+  const to = $('#messageTo').value.trim();
+  const text = $('#messageText').value.trim();
+  if(!to||!text) return log('Preencha destino e texto');
+  // Para manter simples: criar/usar conversa única por contato (exemplo mínimo)
+  // Estratégia naive: inserir mensagem apenas. Banco pode ter trigger para criar conversa.
+  const { error } = await supa.from('messages').insert({ direction:'out', content:text, to_raw: to });
+  if(error) return log('msg erro', error.message);
+  log('mensagem inserida (out)');
+}
+
+async function loadMessages(){ initClient(); if(!supa) return;
+  const { data, error } = await supa.from('messages').select('id,content,direction,created_at').order('created_at',{ascending:false}).limit(30);
+  if(error) return log('msgs erro', error.message);
+  $('#messages').innerHTML = data.map(m=>`<div>${m.direction==='out'?'➡️':'⬅️'} ${m.content} <small>${new Date(m.created_at).toLocaleTimeString()}</small></div>`).join('');
+  $('#messagesMeta').textContent = data.length+' itens';
+  log('mensagens ok', data.length);
+}
+
+$('#saveEnv').onclick = saveLocal;
+$('#signup').onclick = signup;
+$('#signin').onclick = signin;
+$('#signout').onclick = signout;
+$('#whoami').onclick = whoami;
+$('#loadContacts').onclick = loadContacts;
+$('#addContact').onclick = addContact;
+$('#sendMessage').onclick = sendMessage;
+$('#loadMessages').onclick = loadMessages;
+
+loadLocal();
+</script>
+</body>
+</html>
