@@ -10,7 +10,13 @@
   <style>
     .nice-scroll::-webkit-scrollbar{width:8px;height:8px}
     .nice-scroll::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:8px}
-    .line-clamp-1{-webkit-line-clamp:1;-webkit-box-orient:vertical;display:-webkit-box;overflow:hidden}
+    .line-clamp-1{
+      -webkit-line-clamp: 1;
+      line-clamp: 1;
+      -webkit-box-orient: vertical;
+      display: -webkit-box;
+      overflow: hidden;
+    }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-900">
@@ -226,10 +232,11 @@
       $('#authStatus').textContent = 'Criando conta...';
       const { data, error } = await s.auth.signUp({ email, password });
       if (error) { $('#authStatus').textContent = 'Erro: '+error.message; return; }
-      $('#authStatus').textContent = 'Conta criada. Entrando...';
-      // alguns projetos exigem confirmação por e-mail; se estiver desativada, já teremos sessão
-      const ok = await signin(); // faz signin para garantir sessão
-      return ok;
+      $('#authStatus').textContent = 'Conta criada. Verificando sessão...';
+      // Se confirmação de e-mail estiver desligada já teremos sessão; caso contrário usuário terá que confirmar.
+      // Tentamos signIn direto para garantir consistência.
+      await signin();
+      return true;
     }
 
     async function signin() {
@@ -240,31 +247,30 @@
       $('#authStatus').textContent = 'Entrando...';
       const { data, error } = await s.auth.signInWithPassword({ email, password });
       if (error) { $('#authStatus').textContent = 'Erro: '+error.message; return false; }
-      $('#authStatus').textContent = 'Autenticado. Preparando sua loja...';
-      await afterLoginBootstrap();
+      $('#authStatus').textContent = 'Autenticado. Carregando loja...';
+      await afterLogin();
       return true;
     }
 
-    async function afterLoginBootstrap() {
+    // Novo fluxo simplificado: busca a store do usuário (assumindo trigger que já criou a store)
+    async function afterLogin(retry=0){
       const s = ensureSupabase(); if(!s) return;
-      const { data } = await s.auth.getSession();
-      const token = data?.session?.access_token;
-      if (!token) { $('#authStatus').textContent = 'Sem sessão ativa.'; return; }
-
-      // cria/pega a store automaticamente
-      const r = await api('/api/stores/bootstrap', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if(!r.ok){
-        $('#authStatus').textContent = 'Falha ao preparar a loja';
+      const { data: store, error } = await s.from('stores').select('id,name').order('created_at',{ascending:true}).limit(1).maybeSingle();
+      if(error){
+        $('#authStatus').textContent = 'Erro ao consultar store.';
         return;
       }
-      const j = await r.json();
-      cfg.storeId = j.store_id;
-      $('#storeNameTop').textContent = `Loja #${j.store_id.slice(0,8)}`;
-
-      // esconde login e carrega UI
+      if(!store){
+        if(retry < 3){
+          $('#authStatus').textContent = 'Criando store...';
+          await new Promise(r=>setTimeout(r, 600));
+          return afterLogin(retry+1);
+        }
+        $('#authStatus').textContent = 'Store não pronta. Recarregue depois.';
+        return;
+      }
+      cfg.storeId = store.id;
+      $('#storeNameTop').textContent = `Loja #${store.id.slice(0,8)}`;
       $('#loginOverlay').classList.add('hidden');
       await initData();
     }
@@ -274,7 +280,7 @@
       const { data } = await s.auth.getSession();
       const ok = !!data.session;
       $('#loginOverlay').classList.toggle('hidden', ok);
-      if(ok && !cfg.storeId){ await afterLoginBootstrap(); }
+      if(ok && !cfg.storeId){ await afterLogin(); }
       return ok;
     }
 

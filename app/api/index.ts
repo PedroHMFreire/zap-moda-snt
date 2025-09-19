@@ -5,7 +5,6 @@ import { parse } from 'url'
 const routes = [
   { m: 'POST', r: /^\/api\/send$/, h: () => import('../server/routes/send') },
   { m: 'POST', r: /^\/api\/ai\/reply$/, h: () => import('../server/routes/reply') },
-  { m: 'POST', r: /^\/api\/stores\/bootstrap$/, h: () => import('../server/routes/bootstrap') },
   { m: 'GET',  r: /^\/api\/config$/, h: () => import('../server/routes/config') },
   { m: 'GET',  r: /^\/api\/contacts$/, h: () => import('../server/routes/contacts') },
   { m: 'POST', r: /^\/api\/contacts$/, h: () => import('../server/routes/contacts') },
