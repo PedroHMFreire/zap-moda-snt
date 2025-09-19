@@ -27,7 +27,7 @@
         <div class="w-8 h-8 rounded-xl bg-emerald-600"></div>
         <div>
           <div class="font-semibold -mb-1">Santê • WhatsApp IA</div>
-          <div id="storeNameTop" class="text-xs text-slate-500">Loja atual</div>
+          <div id="storeNameTop" class="text-xs text-slate-500">Sessão</div>
         </div>
       </div>
 
@@ -164,7 +164,7 @@
       let SUPABASE_URL  = ls("SUPABASE_URL");
       let SUPABASE_ANON = ls("SUPABASE_ANON_KEY");
       let API_BASE      = ls("API_BASE");
-      let STORE_ID      = ls("STORE_ID");
+  // STORE_ID removido
 
       if (!SUPABASE_URL || !SUPABASE_ANON) {
         try {
@@ -174,11 +174,9 @@
             SUPABASE_URL  = SUPABASE_URL  || cfg.SUPABASE_URL  || "";
             SUPABASE_ANON = SUPABASE_ANON || cfg.SUPABASE_ANON_KEY || "";
             API_BASE      = API_BASE      || cfg.API_BASE || "";
-            STORE_ID      = STORE_ID      || cfg.STORE_ID || "";
             if (SUPABASE_URL)  localStorage.setItem("SUPABASE_URL", SUPABASE_URL);
             if (SUPABASE_ANON) localStorage.setItem("SUPABASE_ANON_KEY", SUPABASE_ANON);
             if (API_BASE)      localStorage.setItem("API_BASE", API_BASE);
-            if (STORE_ID)      localStorage.setItem("STORE_ID", STORE_ID);
           }
         } catch (e) {}
       }
@@ -188,8 +186,7 @@
       get supabaseUrl(){ return localStorage.getItem('SUPABASE_URL') || ''; },
       get supabaseAnon(){ return localStorage.getItem('SUPABASE_ANON_KEY') || ''; },
       get apiBase(){ return localStorage.getItem('API_BASE') || ''; },
-      get storeId(){ return localStorage.getItem('STORE_ID') || ''; },
-      set storeId(v){ localStorage.setItem('STORE_ID', v || ''); },
+  // storeId removido
       get away(){ return localStorage.getItem('AWAY') === '1'; },
       set away(v){ localStorage.setItem('AWAY', v ? '1':'0'); }
     };
@@ -213,6 +210,13 @@
       const headers = Object.assign({'Content-Type':'application/json'}, init.headers||{});
       return fetch(base+path, Object.assign(init, {headers}));
     };
+
+    async function authHeader(){
+      if(!supa) return {};
+      const { data } = await supa.auth.getSession();
+      const token = data.session?.access_token;
+      return token ? { Authorization: 'Bearer '+token } : {};
+    }
 
     let supa = null;
     function ensureSupabase(){
@@ -247,59 +251,20 @@
       $('#authStatus').textContent = 'Entrando...';
       const { data, error } = await s.auth.signInWithPassword({ email, password });
       if (error) { $('#authStatus').textContent = 'Erro: '+error.message; return false; }
-      $('#authStatus').textContent = 'Autenticado. Carregando loja...';
-      await afterLogin();
+      $('#authStatus').textContent = 'Autenticado.';
+      $('#loginOverlay').classList.add('hidden');
+      await initData();
       return true;
     }
 
-    // Novo fluxo simplificado: busca a store do usuário (assumindo trigger que já criou a store)
-    async function afterLogin(retry=0){
-      const s = ensureSupabase(); if(!s) return;
-      const { data: store, error } = await s.from('stores').select('id,name').order('created_at',{ascending:true}).limit(1).maybeSingle();
-      if(error){
-        $('#authStatus').textContent = 'Erro ao consultar store.';
-        return;
-      }
-      if(!store){
-        if(retry < 3){
-          $('#authStatus').textContent = 'Criando store...';
-          await new Promise(r=>setTimeout(r, 600));
-          return afterLogin(retry+1);
-        }
-        // fallback: chama ensure no backend para criar
-        $('#authStatus').textContent = 'Garantindo store...';
-        try {
-          const { data: sessionData } = await s.auth.getSession();
-          const token = sessionData?.session?.access_token;
-          if (token) {
-            const r = await fetch('/api/stores/ensure', { method:'POST', headers:{ 'Authorization': 'Bearer '+token } });
-            if (r.ok) {
-              const j = await r.json();
-              cfg.storeId = j.store_id;
-              $('#storeNameTop').textContent = `Loja #${j.store_id.slice(0,8)}`;
-              $('#loginOverlay').classList.add('hidden');
-              await initData();
-              return;
-            }
-          }
-          $('#authStatus').textContent = 'Falha ao garantir store.';
-        } catch(e){
-          $('#authStatus').textContent = 'Erro ao criar store.';
-        }
-        return;
-      }
-      cfg.storeId = store.id;
-      $('#storeNameTop').textContent = `Loja #${store.id.slice(0,8)}`;
-      $('#loginOverlay').classList.add('hidden');
-      await initData();
-    }
+    // afterLogin removido (não há mais store)
 
     async function checkSession(){
       const s = ensureSupabase(); if(!s) return false;
       const { data } = await s.auth.getSession();
       const ok = !!data.session;
       $('#loginOverlay').classList.toggle('hidden', ok);
-      if(ok && !cfg.storeId){ await afterLogin(); }
+      // nada extra
       return ok;
     }
 
@@ -393,27 +358,28 @@
       if(!state.contact){ toast('Selecione um contato','error'); return; }
       const text = $('#composer').value.trim();
       if(!text){ return; }
-      const body = { to: state.contact.phone || state.contact.wa_id, text, store_id: cfg.storeId };
-      const r = await api('/api/send',{ method:'POST', body: JSON.stringify(body) });
+  const body = { to: state.contact.phone || state.contact.wa_id, text };
+  const hdr = await authHeader();
+  const r = await api('/api/send',{ method:'POST', body: JSON.stringify(body), headers: hdr });
       if(!r.ok){ toast('Falha ao enfileirar mensagem','error'); return; }
       state.messages.push({ direction:'out', content:text, created_at: Date.now() });
       $('#composer').value = '';
       renderMessages();
     }
 
-    // QR / Sessão (igual)
+    // QR / Sessão
     let qrTimerInt = null, qrPollInt = null, currentSessionId = null, qrSeconds = 60;
-    function openQR(){
-      if(!cfg.storeId){ toast('Loja não preparada ainda. Faça login.','error'); return; }
+    async function openQR(){
       document.getElementById('qrModal').classList.remove('hidden');
       document.getElementById('qrBox').innerHTML = `<div class="text-slate-500 text-sm">Gerando QR...</div>`;
       document.getElementById('qrStatus').textContent = 'Pendente';
       document.getElementById('qrDot').className='inline-flex h-2.5 w-2.5 rounded-full bg-amber-400';
       document.getElementById('qrTimer').textContent = '60s';
       qrSeconds = 60;
-
-      api('/api/sessions/create', { method: 'POST', body: JSON.stringify({ store_id: cfg.storeId }) })
-      .then(r=>r.json()).then(d=>{
+      try {
+        const hdr = await authHeader();
+        const r = await api('/api/sessions/create', { method: 'POST', headers: hdr });
+        const d = await r.json();
         currentSessionId = d.session_id;
         if(d.qr){
           const img = new Image(); img.src = d.qr; img.className='w-64 h-64 object-contain';
@@ -428,26 +394,27 @@
         }, 1000);
         clearInterval(qrPollInt);
         qrPollInt = setInterval(async ()=>{
-          const rs = await api(`/api/sessions/status?session_id=${encodeURIComponent(currentSessionId)}`);
+          const hdr2 = await authHeader();
+          const rs = await api(`/api/sessions/status?session_id=${encodeURIComponent(currentSessionId)}`, { headers: hdr2 });
           if(!rs.ok) return;
           const st = await rs.json();
-          setSessionUI(st.status || 'pending');
-          document.getElementById('qrStatus').textContent = (st.status||'pending');
-          const map = {connected:'bg-emerald-500', pending:'bg-amber-400', failed:'bg-rose-500'};
-          document.getElementById('qrDot').className = 'inline-flex h-2.5 w-2.5 rounded-full '+(map[st.status]||'bg-amber-400');
-          if(st.status==='connected'){
-            clearInterval(qrPollInt); clearInterval(qrTimerInt);
-            toast('WhatsApp conectado!');
-            document.getElementById('qrModal').classList.add('hidden');
-          }
+            setSessionUI(st.status || 'pending');
+            document.getElementById('qrStatus').textContent = (st.status||'pending');
+            const map = {connected:'bg-emerald-500', pending:'bg-amber-400', failed:'bg-rose-500'};
+            document.getElementById('qrDot').className = 'inline-flex h-2.5 w-2.5 rounded-full '+(map[st.status]||'bg-amber-400');
+            if(st.status==='connected'){
+              clearInterval(qrPollInt); clearInterval(qrTimerInt);
+              toast('WhatsApp conectado!');
+              document.getElementById('qrModal').classList.add('hidden');
+            }
         }, 2000);
-      }).catch(()=>{
+      } catch(e){
         document.getElementById('qrBox').innerHTML = `<div class="text-rose-500 text-sm">Erro ao criar sessão.</div>`;
-      });
+      }
     }
 
     // Tema
-    let dark=false;
+    let dark = false;
     function toggleTheme(){
       dark = !dark;
       document.documentElement.classList.toggle('dark', dark);
@@ -458,7 +425,7 @@
     }
 
     async function initData(){
-      document.getElementById('storeNameTop').textContent = cfg.storeId ? `Loja #${cfg.storeId.slice(0,8)}` : 'Loja não definida';
+  document.getElementById('storeNameTop').textContent = 'Sessão ativa';
       await Promise.all([loadContacts(), loadProducts()]);
       setSessionUI('pending');
     }

@@ -1,6 +1,6 @@
 // app/api/inbound/index.ts
 import { Pool } from 'pg';
-import { getUserFromAuthHeader, assertStoreOwnership } from '../../lib/auth';
+import { getUserFromAuthHeader } from '../../lib/auth';
 
 let pool: Pool | null = null;
 function getPool() {
@@ -13,16 +13,16 @@ function authOk(req: any) {
   return token && token === process.env.INTERNAL_WEBHOOK_TOKEN;
 }
 
-async function upsertContact(db: Pool, store_id: string, wa_or_phone: string, name?: string) {
+async function upsertContact(db: Pool, owner_id: string, wa_or_phone: string, name?: string) {
   let r = await db.query(
-    `select id from contacts where store_id=$1 and (phone=$2 or wa_id=$2) limit 1`,
-    [store_id, wa_or_phone]
+    `select id from contacts where owner_id=$1 and (phone=$2 or wa_id=$2) limit 1`,
+    [owner_id, wa_or_phone]
   );
   if (r.rowCount === 0) {
     r = await db.query(
-      `insert into contacts (store_id, phone, wa_id, name, last_interaction_at)
+      `insert into contacts (owner_id, phone, wa_id, name, last_interaction_at)
        values ($1,$2,$2,$3, now()) returning id`,
-      [store_id, wa_or_phone, name || null]
+      [owner_id, wa_or_phone, name || null]
     );
   } else {
     await db.query(
@@ -31,22 +31,22 @@ async function upsertContact(db: Pool, store_id: string, wa_or_phone: string, na
     );
   }
   return (r.rowCount ? r.rows[0].id : (await db.query(
-    `select id from contacts where store_id=$1 and (phone=$2 or wa_id=$2) limit 1`,
-    [store_id, wa_or_phone]
+    `select id from contacts where owner_id=$1 and (phone=$2 or wa_id=$2) limit 1`,
+    [owner_id, wa_or_phone]
   )).rows[0].id);
 }
 
-async function ensureConversation(db: Pool, store_id: string, contact_id: string) {
+async function ensureConversation(db: Pool, owner_id: string, contact_id: string) {
   let r = await db.query(
-    `select id from conversations where store_id=$1 and contact_id=$2 and status='open'
+    `select id from conversations where owner_id=$1 and contact_id=$2 and status='open'
      order by created_at desc limit 1`,
-    [store_id, contact_id]
+    [owner_id, contact_id]
   );
   if (r.rowCount === 0) {
     r = await db.query(
-      `insert into conversations (store_id, contact_id, status, last_message_at)
+      `insert into conversations (owner_id, contact_id, status, last_message_at)
        values ($1,$2,'open', now()) returning id`,
-      [store_id, contact_id]
+      [owner_id, contact_id]
     );
   }
   return r.rows[0].id;
@@ -61,22 +61,21 @@ export default async function handler(req: any, res: any) {
 
   const db = getPool();
   try {
-    const { store_id, from, name, type, content, media_url, ts } = req.body || {};
-    if (!store_id || !from) return res.status(400).json({ error: 'store_id e from são obrigatórios.' });
+  const { from, name, type, content, media_url, ts } = req.body || {};
+  if (!from) return res.status(400).json({ error: 'from obrigatório.' });
 
     // (Opcional) se header Bearer user presente, confirma ownership — útil para debug manual
     const user = await getUserFromAuthHeader(req);
-    if (user) {
-      try { await assertStoreOwnership(user.id, store_id); } catch { return res.status(403).json({ error: 'forbidden' }); }
-    }
+    const owner_id = user?.id || null; // inbound pode ser interno sem user
 
-    const contact_id = await upsertContact(db, store_id, from, name);
-    const conversation_id = await ensureConversation(db, store_id, contact_id);
+    if (!owner_id) return res.status(400).json({ error: 'owner ausente (token interno inválido ou não configurado)' });
+    const contact_id = await upsertContact(db, owner_id, from, name);
+    const conversation_id = await ensureConversation(db, owner_id, contact_id);
 
     await db.query(
-      `insert into messages (conversation_id, store_id, contact_id, direction, type, content, media_url, status, created_at)
+      `insert into messages (conversation_id, owner_id, contact_id, direction, type, content, media_url, status, created_at)
        values ($1,$2,$3,'in',$4,$5,$6,'received', to_timestamp($7))`,
-      [conversation_id, store_id, contact_id, media_url ? 'media' : (type || 'text'), content || null, media_url || null, Math.floor(((ts ? Number(ts) : Date.now())/1000))]
+      [conversation_id, owner_id, contact_id, media_url ? 'media' : (type || 'text'), content || null, media_url || null, Math.floor(((ts ? Number(ts) : Date.now())/1000))]
     );
     await db.query(`update conversations set last_message_at=now() where id=$1`, [conversation_id]);
 
@@ -84,7 +83,7 @@ export default async function handler(req: any, res: any) {
     fetch((process.env.API_BASE || '') + '/api/ai/reply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ store_id, conversation_id, contact_id })
+      body: JSON.stringify({ conversation_id, contact_id })
     }).catch(() => { /* silencioso */ });
 
     return res.status(200).json({ ok: true });

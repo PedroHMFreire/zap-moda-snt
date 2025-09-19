@@ -10,7 +10,6 @@ interface RouteDef { method: string; path: RegExp; handler: () => Promise<{ defa
 const routes: RouteDef[] = [
   { method: 'POST', path: /^\/api\/send$/, handler: () => import('../app/server/routes/send') },
   { method: 'POST', path: /^\/api\/ai\/reply$/, handler: () => import('../app/server/routes/reply') },
-  { method: 'POST', path: /^\/api\/stores\/ensure$/, handler: () => import('../app/server/routes/ensureStore') },
   { method: 'GET',  path: /^\/api\/config$/, handler: () => import('../app/server/routes/config') },
   { method: 'GET',  path: /^\/api\/contacts$/, handler: () => import('../app/server/routes/contacts') },
   { method: 'POST', path: /^\/api\/contacts$/, handler: () => import('../app/server/routes/contacts') },

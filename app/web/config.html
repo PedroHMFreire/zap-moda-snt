@@ -18,47 +18,42 @@
   </header>
 
   <main class="max-w-3xl mx-auto p-4 space-y-6">
-    <!-- Conexões -->
+    <!-- Conexões / Ambiente -->
     <section class="bg-white border rounded-2xl p-4">
-      <h2 class="font-semibold mb-3">Conexões</h2>
+      <h2 class="font-semibold mb-3">Ambiente</h2>
+
+      <p class="text-sm text-slate-600 mb-4">Modelo simplificado: cada usuário Supabase = 1 workspace isolado. Não existe mais STORE_ID. Configure apenas as chaves e (opcional) a base da API se for diferente.</p>
 
       <label class="block text-sm mb-1">SUPABASE_URL</label>
       <input id="supabaseUrl" class="w-full px-3 py-2 rounded-lg border mb-3" placeholder="https://xyzcompany.supabase.co" />
 
       <label class="block text-sm mb-1">SUPABASE_ANON_KEY</label>
-      <input id="supabaseAnon" class="w-full px-3 py-2 rounded-lg border mb-3" placeholder="chave pública (anon) da Supabase" />
-
-      <label class="block text-sm mb-1">STORE_ID (UUID)</label>
-      <input id="storeId" class="w-full px-3 py-2 rounded-lg border mb-3" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+      <input id="supabaseAnon" class="w-full px-3 py-2 rounded-lg border mb-3" placeholder="Chave pública (anon) da Supabase" />
 
       <label class="block text-sm mb-1">API_BASE (opcional)</label>
       <input id="apiBase" class="w-full px-3 py-2 rounded-lg border mb-3" placeholder="Ex.: https://seu-dominio.vercel.app" />
 
-      <div class="flex gap-2">
+      <div class="flex gap-2 flex-wrap">
         <button id="saveBtn" class="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Salvar</button>
-        <button id="testBtn" class="px-4 py-2 rounded-lg border bg-white hover:bg-slate-50">Testar conexões</button>
+        <button id="testBtn" class="px-4 py-2 rounded-lg border bg-white hover:bg-slate-50">Testar API pública</button>
+        <button id="testAuthBtn" class="px-4 py-2 rounded-lg border bg-white hover:bg-slate-50">Testar Auth (token)</button>
+        <button id="disconnectBtn" class="px-4 py-2 rounded-lg border bg-white hover:bg-slate-50">Desconectar sessão WhatsApp</button>
       </div>
       <p id="status" class="text-sm text-slate-500 mt-2">—</p>
     </section>
 
-    <!-- Loja -->
+    <!-- Preferências locais -->
     <section class="bg-white border rounded-2xl p-4">
-      <h2 class="font-semibold mb-3">Loja</h2>
+      <h2 class="font-semibold mb-3">Preferências Locais</h2>
+      <p class="text-sm text-slate-600 mb-3">Algumas preferências ficam só no seu navegador. A mensagem de ausente é aplicada apenas no cliente (futuro: mover para tabela owner_settings).</p>
 
-      <label class="block text-sm mb-1">Mensagem de Ausente</label>
+      <label class="block text-sm mb-1">Mensagem de Ausente (local)</label>
       <textarea id="awayMsg" rows="3" class="w-full px-3 py-2 rounded-lg border mb-3" placeholder="Estamos fora do horário. Deixe sua mensagem e retornaremos assim que possível."></textarea>
 
-      <label class="block text-sm mb-1">Limite por minuto</label>
-      <input id="rateLimit" type="number" min="1" class="w-full px-3 py-2 rounded-lg border mb-3" placeholder="20" />
-
-      <label class="block text-sm mb-1">Horário comercial (JSON)</label>
-      <textarea id="bizHours" rows="4" class="w-full px-3 py-2 rounded-lg border font-mono text-xs" placeholder='{"mon":"09:00-18:00","sat":"09:00-13:00"}'></textarea>
-
       <div class="flex gap-2">
-        <button id="saveStoreBtn" class="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Salvar loja</button>
-        <button id="disconnectBtn" class="px-4 py-2 rounded-lg border bg-white hover:bg-slate-50">Desconectar WhatsApp</button>
+        <button id="saveLocalBtn" class="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Salvar Preferências</button>
       </div>
-      <p id="storeStatus" class="text-sm text-slate-500 mt-2">—</p>
+      <p id="prefsStatus" class="text-sm text-slate-500 mt-2">—</p>
     </section>
   </main>
 
@@ -69,25 +64,22 @@
       set supabaseUrl(v){ localStorage.setItem('SUPABASE_URL', v||''); },
       get supabaseAnon(){ return localStorage.getItem('SUPABASE_ANON_KEY') || ''; },
       set supabaseAnon(v){ localStorage.setItem('SUPABASE_ANON_KEY', v||''); },
-      get storeId(){ return localStorage.getItem('STORE_ID') || ''; },
-      set storeId(v){ localStorage.setItem('STORE_ID', v||''); },
       get apiBase(){ return localStorage.getItem('API_BASE') || ''; },
       set apiBase(v){ localStorage.setItem('API_BASE', v||''); },
+      get awayMsg(){ return localStorage.getItem('AWAY_MSG') || ''; },
+      set awayMsg(v){ localStorage.setItem('AWAY_MSG', v||''); },
     };
 
-    function load(){
+    async function load(){
       $('#supabaseUrl').value = cfg.supabaseUrl;
       $('#supabaseAnon').value = cfg.supabaseAnon;
-      $('#storeId').value = cfg.storeId;
       $('#apiBase').value = cfg.apiBase;
-      // tenta carregar dados da loja (se existir endpoint GET /api/stores)
-      // deixamos manual por enquanto
+      $('#awayMsg').value = cfg.awayMsg;
     }
 
     function save(){
       cfg.supabaseUrl = $('#supabaseUrl').value.trim();
       cfg.supabaseAnon = $('#supabaseAnon').value.trim();
-      cfg.storeId = $('#storeId').value.trim();
       cfg.apiBase = $('#apiBase').value.trim();
       $('#status').textContent = 'Configurações salvas!';
     }
@@ -102,41 +94,50 @@
       }catch(e){ $('#status').textContent = 'Falha ao alcançar a API ❌'; }
     }
 
-    async function saveStore(){
+    async function testAuth(){
       const base = cfg.apiBase || '';
-      const body = {
-        store_id: cfg.storeId,
-        away_message: $('#awayMsg').value,
-        rate_limit_per_min: Number($('#rateLimit').value||20) || 20,
-        business_hours: tryParse($('#bizHours').value)
-      };
-      $('#storeStatus').textContent = 'Salvando...';
-      try{
-        const r = await fetch(base+'/api/stores', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-        $('#storeStatus').textContent = r.ok ? 'Loja salva ✅' : 'Erro ao salvar loja ❌';
-      }catch(e){
-        $('#storeStatus').textContent = 'Falha de rede ao salvar loja ❌';
+      $('#status').textContent = 'Testando auth...';
+      try {
+        if(!window.supabase){ await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'); }
+        const url = cfg.supabaseUrl, anon = cfg.supabaseAnon;
+        if(!url || !anon){ $('#status').textContent = 'Defina SUPABASE_URL e ANON_KEY primeiro.'; return; }
+        const sb = window.supabase.createClient(url, anon);
+        const { data: sess } = await sb.auth.getSession();
+        if(!sess.session){ $('#status').textContent = 'Sem sessão: faça login na tela principal.'; return; }
+        const token = sess.session.access_token;
+        const r = await fetch(base+'/api/contacts', { headers:{ Authorization: 'Bearer '+token }});
+        $('#status').textContent = r.ok ? 'Auth OK (contacts acessível) ✅' : 'Auth falhou ❌';
+      } catch(e){
+        $('#status').textContent = 'Erro ao testar auth ❌';
       }
+    }
+
+    function saveLocal(){
+      cfg.awayMsg = $('#awayMsg').value;
+      $('#prefsStatus').textContent = 'Preferências salvas (local).';
     }
 
     async function disconnect(){
       const base = cfg.apiBase || '';
-      $('#storeStatus').textContent = 'Desconectando...';
-      try{
-        const r = await fetch(base+'/api/sessions/disconnect', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ store_id: cfg.storeId }) });
-        $('#storeStatus').textContent = r.ok ? 'Sessão desconectada ✅' : 'Erro ao desconectar ❌';
-      }catch(e){
-        $('#storeStatus').textContent = 'Falha ao desconectar ❌';
+      $('#status').textContent = 'Desconectando...';
+      try {
+        // tenta pegar token existente
+        if(!window.supabase){ await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'); }
+        const url = cfg.supabaseUrl, anon = cfg.supabaseAnon;
+        const sb = (url && anon) ? window.supabase.createClient(url, anon) : null;
+        let token = '';
+        if(sb){ const { data } = await sb.auth.getSession(); token = data.session?.access_token || ''; }
+        const r = await fetch(base+'/api/sessions/disconnect', { method:'POST', headers:Object.assign({'Content-Type':'application/json'}, token?{Authorization:'Bearer '+token}:{}) });
+        $('#status').textContent = r.ok ? 'Sessão desconectada (se existia) ✅' : 'Falha ao desconectar ❌';
+      } catch(e){
+        $('#status').textContent = 'Erro ao desconectar ❌';
       }
-    }
-
-    function tryParse(txt){
-      try{ return JSON.parse(txt || '{}'); }catch(_){ return {}; }
     }
 
     document.getElementById('saveBtn').onclick = save;
     document.getElementById('testBtn').onclick = test;
-    document.getElementById('saveStoreBtn').onclick = saveStore;
+    document.getElementById('testAuthBtn').onclick = testAuth;
+    document.getElementById('saveLocalBtn').onclick = saveLocal;
     document.getElementById('disconnectBtn').onclick = disconnect;
 
     load();

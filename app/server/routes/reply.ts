@@ -1,7 +1,7 @@
 // app/api/ai/reply/index.ts
 import { Pool } from 'pg';
 import { hitRateLimit } from '../../lib/rateLimit';
-import { getUserFromAuthHeader, assertStoreOwnership } from '../../lib/auth';
+import { getUserFromAuthHeader } from '../../lib/auth';
 
 // Pool PG simples (usa o mesmo Postgres que o pg-boss)
 let pool: Pool | null = null;
@@ -28,40 +28,19 @@ Regras:
 Fallback: se contexto for insuficiente, peça dados (tamanho, estilo, orçamento) e ofereça sugestões claras.
 `.trim();
 
-async function fetchContext(db: Pool, store_id: string, conversation_id: string) {
+async function fetchContext(db: Pool, owner_id: string, conversation_id: string) {
   const r = await db.query(
     `select direction, coalesce(content,'') as content, created_at
      from messages
-     where store_id=$1 and conversation_id=$2
+     where owner_id=$1 and conversation_id=$2
      order by created_at desc
      limit 12`,
-    [store_id, conversation_id]
+    [owner_id, conversation_id]
   );
   return r.rows.reverse();
 }
 
-async function fetchProducts(db: Pool, store_id: string) {
-  const r = await db.query(
-    `select name, price, coalesce(category,'') as category, coalesce(images,'{}') as images
-     from products
-     where store_id=$1
-     order by created_at desc
-     limit 12`,
-    [store_id]
-  );
-  return r.rows;
-}
-
-async function fetchStore(db: Pool, store_id: string) {
-  const r = await db.query(
-    `select s.away_message, s.business_hours
-       from stores s
-      where s.id=$1
-      limit 1`,
-    [store_id]
-  );
-  return r.rows[0] || {};
-}
+// Produtos / away_message removidos no modelo simplificado; podemos futuramente ligar a uma tabela simples.
 
 async function fetchContactPhone(db: Pool, contact_id: string) {
   const r = await db.query(
@@ -81,20 +60,18 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: 'OPENAI_API_KEY não configurada' });
     }
 
-    const { store_id, conversation_id, contact_id } = req.body || {};
-    must(store_id, 'store_id');
+    const { conversation_id, contact_id } = req.body || {};
     must(conversation_id, 'conversation_id');
     must(contact_id, 'contact_id');
 
     // Autenticação opcional - se fornecida, verifica ownership; caso contrário continua (para uso interno).
     const user = await getUserFromAuthHeader(req);
-    if (user) {
-      try { await assertStoreOwnership(user.id, store_id); } catch { return res.status(403).json({ error: 'forbidden' }); }
-    }
+    const owner_id = user?.id || null;
+    if (!owner_id) return res.status(401).json({ error: 'unauthorized' });
 
-    // Rate limit IA por store
+    // Rate limit IA por owner
     try {
-      const rl = await hitRateLimit(`rl:ai:${store_id}`, 30, 300); // 30 respostas/5min
+      const rl = await hitRateLimit(`rl:ai:${owner_id}`, 30, 300); // 30 respostas/5min
       res.setHeader('X-RateLimit-Limit', rl.limit.toString());
       res.setHeader('X-RateLimit-Remaining', rl.remaining.toString());
       res.setHeader('X-RateLimit-Reset', rl.reset.toString());
@@ -102,27 +79,13 @@ export default async function handler(req: any, res: any) {
     } catch {/* falha silenciosa não bloqueia */}
 
     const db = getPool();
-    const [msgs, prods, store] = await Promise.all([
-      fetchContext(db, store_id, conversation_id),
-      fetchProducts(db, store_id),
-      fetchStore(db, store_id),
-    ]);
+    const msgs = await fetchContext(db, owner_id, conversation_id);
 
     // prompt de usuário com contexto objetivo
     const lines: string[] = [];
     lines.push('Histórico (mais recente por último):');
     for (const m of msgs) {
       lines.push(`${m.direction === 'out' ? 'Atendente' : 'Cliente'}: ${m.content}`);
-    }
-    lines.push('');
-    if (store?.away_message) {
-      lines.push(`Mensagem de ausente configurada: "${store.away_message}"`);
-      lines.push('');
-    }
-    lines.push('Catálogo (nome • preço • categoria):');
-    for (const p of prods) {
-      const price = Number(p.price || 0).toFixed(2);
-      lines.push(`${p.name} • R$ ${price} • ${p.category || '-'}`);
     }
     lines.push('');
     lines.push('Gere uma resposta útil, breve (máx. 2 parágrafos) e finalize com um CTA curto.');
@@ -166,8 +129,8 @@ export default async function handler(req: any, res: any) {
     const apiBase = process.env.API_BASE || '';
     await fetch(`${apiBase}/api/send`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-store-id': store_id },
-      body: JSON.stringify({ to, text: answer, store_id, conversation_id, contact_id })
+      headers: { 'Content-Type': 'application/json', Authorization: req.headers.authorization || '' },
+      body: JSON.stringify({ to, text: answer, conversation_id, contact_id })
     }).catch(() => { /* silencioso */ });
 
     return res.status(200).json({ ok: true, answer });

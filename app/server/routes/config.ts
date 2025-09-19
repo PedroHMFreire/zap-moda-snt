@@ -6,8 +6,7 @@ export default async function handler(_req: any, res: any) {
     SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || "",
     // Se o front e a API estão no mesmo domínio, pode deixar vazio.
     API_BASE: process.env.PUBLIC_API_BASE || "",
-    // Para mono-loja, você pode definir na Vercel o PUBLIC_STORE_ID (uuid)
-    STORE_ID: process.env.PUBLIC_STORE_ID || ""
+    MODEL: 'user-as-workspace'
   };
 
   if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {

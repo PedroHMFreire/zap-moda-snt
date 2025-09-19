@@ -1,6 +1,6 @@
 // app/api/products/index.ts
 import { Pool } from 'pg';
-import { getUserFromAuthHeader, assertStoreOwnership } from '../../lib/auth';
+import { getUserFromAuthHeader } from '../../lib/auth';
 import { hitRateLimit } from '../../lib/rateLimit';
 
 let pool: Pool | null = null;
@@ -8,27 +8,22 @@ function getPool() {
   if (!pool) pool = new Pool({ connectionString: process.env.QUEUE_DB_URL });
   return pool;
 }
-function getStoreId(req: any) {
-  return req.headers['x-store-id'] || req.query.store_id || req.body?.store_id;
-}
+// store_id removido
 
 export default async function handler(req: any, res: any) {
   const db = getPool();
-  const store_id = getStoreId(req);
-  if (!store_id) return res.status(400).json({ error: 'store_id obrigatório.' });
-
   try {
     const user = await getUserFromAuthHeader(req);
     if (!user) return res.status(401).json({ error: 'unauthorized' });
-    try { await assertStoreOwnership(user.id, store_id); } catch { return res.status(403).json({ error: 'forbidden' }); }
+    const owner_id = user.id;
 
     if (req.method === 'GET') {
       const q = (req.query.q || '').toString();
-      const params: any[] = [store_id];
+      const params: any[] = [owner_id];
       let sql = `
         select id, name, price, category, description, images
         from products
-        where store_id = $1
+        where owner_id = $1
       `;
       if (q) {
         params.push(`%${q}%`, `%${q}%`);
@@ -42,7 +37,7 @@ export default async function handler(req: any, res: any) {
     if (req.method === 'POST') {
       // Rate limit criação de produtos
       try {
-        const rl = await hitRateLimit(`rl:prod:create:${store_id}`, 30, 300); // 30 em 5min
+  const rl = await hitRateLimit(`rl:prod:create:${owner_id}`, 30, 300); // 30 em 5min
         res.setHeader('X-RateLimit-Limit', rl.limit.toString());
         res.setHeader('X-RateLimit-Remaining', rl.remaining.toString());
         res.setHeader('X-RateLimit-Reset', rl.reset.toString());
@@ -56,10 +51,10 @@ export default async function handler(req: any, res: any) {
       if (price < 0) return res.status(400).json({ error: 'price inválido' });
       const desc = description && description.length > 4000 ? description.slice(0, 4000) : description;
       const r = await db.query(
-        `insert into products (store_id, name, price, category, description, images)
+        `insert into products (owner_id, name, price, category, description, images)
          values ($1,$2,$3,$4,$5,$6)
          returning id, name, price, category, description, images`,
-        [store_id, name, price, category || null, desc || null, Array.isArray(images) ? images : []]
+        [owner_id, name, price, category || null, desc || null, Array.isArray(images) ? images : []]
       );
       return res.status(201).json(r.rows[0]);
     }

@@ -1,32 +1,27 @@
 // app/api/contacts/index.ts
 import { Pool } from 'pg';
-import { getUserFromAuthHeader, assertStoreOwnership } from '../../lib/auth';
+import { getUserFromAuthHeader } from '../../lib/auth';
 
 let pool: Pool | null = null;
 function getPool() {
   if (!pool) pool = new Pool({ connectionString: process.env.QUEUE_DB_URL });
   return pool;
 }
-function getStoreId(req: any) {
-  return req.headers['x-store-id'] || req.query.store_id || req.body?.store_id;
-}
+// store_id removido, agora usamos owner_id (do token)
 
 export default async function handler(req: any, res: any) {
   const db = getPool();
-  const store_id = getStoreId(req);
-  if (!store_id) return res.status(400).json({ error: 'store_id obrigatório (header x-store-id ou query/body).' });
-
   try {
     const user = await getUserFromAuthHeader(req);
     if (!user) return res.status(401).json({ error: 'unauthorized' });
-    try { await assertStoreOwnership(user.id, store_id); } catch { return res.status(403).json({ error: 'forbidden' }); }
+    const owner_id = user.id;
     if (req.method === 'GET') {
       const q = (req.query.q || '').toString();
-      const params: any[] = [store_id];
+      const params: any[] = [owner_id];
       let sql = `
         select id, name, phone, wa_id, last_interaction_at
         from contacts
-        where store_id = $1
+        where owner_id = $1
       `;
       if (q) {
         params.push(`%${q}%`, `%${q}%`, `%${q}%`);
@@ -41,10 +36,10 @@ export default async function handler(req: any, res: any) {
       const { name, phone, wa_id } = req.body || {};
       if (!phone && !wa_id) return res.status(400).json({ error: 'phone ou wa_id obrigatório.' });
       const r = await db.query(
-        `insert into contacts (store_id, name, phone, wa_id, last_interaction_at)
+        `insert into contacts (owner_id, name, phone, wa_id, last_interaction_at)
          values ($1,$2,$3,$4, now())
          returning id, name, phone, wa_id, last_interaction_at`,
-        [store_id, name || null, phone || null, wa_id || null]
+        [owner_id, name || null, phone || null, wa_id || null]
       );
       return res.status(201).json(r.rows[0]);
     }

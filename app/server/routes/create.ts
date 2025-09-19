@@ -1,36 +1,29 @@
 // app/api/sessions/create/index.ts
 import { db } from '../../lib/db';
 import { notifySessionStart } from '../../lib/queue';
-import { getUserFromAuthHeader, assertStoreOwnership } from '../../lib/auth';
-
-function getStoreId(req: any) {
-  return req.headers['x-store-id'] || req.query.store_id || req.body?.store_id;
-}
+import { getUserFromAuthHeader } from '../../lib/auth';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  const store_id = getStoreId(req);
-  if (!store_id) return res.status(400).json({ error: 'store_id obrigatório.' });
-
   try {
     const user = await getUserFromAuthHeader(req);
     if (!user) return res.status(401).json({ error: 'unauthorized' });
-    try { await assertStoreOwnership(user.id, store_id); } catch { return res.status(403).json({ error: 'forbidden' }); }
+    const owner_id = user.id;
     const p = db();
     const created = await p.query(
-      `insert into whatsapp_sessions (store_id, status, last_qr)
+      `insert into whatsapp_sessions (owner_id, status, last_qr)
        values ($1, 'pending', null)
        returning id, status, last_qr, connected_at, updated_at`,
-      [store_id]
+      [owner_id]
     );
     const sess = created.rows[0];
     const session_id = sess.id;
 
     // publica job PgBoss para o Worker iniciar a sessão
-    await notifySessionStart({ store_id, session_id });
+  await notifySessionStart({ owner_id, session_id });
 
     return res.status(200).json({
       session_id,

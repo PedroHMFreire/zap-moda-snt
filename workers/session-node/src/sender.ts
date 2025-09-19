@@ -5,10 +5,11 @@ import { Pool } from 'pg';
 import { fileTypeFromBuffer } from 'file-type';
 import { fetch } from 'undici';
 
-type GetSocketFn = (storeId: string) => any | null;
+type GetSocketFn = (ownerId: string) => any | null;
 
 type SendMessageJob = {
-  store_id: string;
+  owner_id?: string; // compat
+  store_id?: string; // legacy
   to: string;
   text?: string;
   media_url?: string;
@@ -20,36 +21,23 @@ type SendMessageJob = {
 
 // Rate limit por loja: janela deslizante de 60s
 const windowMs = 60_000;
-const sentTimestamps = new Map<string, number[]>(); // store_id -> timestamps (ms)
+const sentTimestamps = new Map<string, number[]>(); // owner_id -> timestamps (ms)
 
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function getRateLimitPerMin(pool: Pool, store_id: string): Promise<number> {
-  try {
-    const r = await pool.query(
-      `select coalesce(w.rate_limit_per_min,20) as lim
-         from whatsapp_configs w where w.store_id=$1`,
-      [store_id],
-    );
-    return Number(r.rows?.[0]?.lim || 20);
-  } catch {
-    return 20;
-  }
-}
-
-async function ensureRate(pool: Pool, store_id: string, logger: pino.Logger) {
-  const limit = await getRateLimitPerMin(pool, store_id);
+async function ensureRate(_pool: Pool, owner_id: string, logger: pino.Logger) {
+  const limit = 20; // valor fixo simplificado
   const now = Date.now();
-  const arr = (sentTimestamps.get(store_id) || []).filter((ts) => now - ts < windowMs);
+  const arr = (sentTimestamps.get(owner_id) || []).filter((ts) => now - ts < windowMs);
   if (arr.length >= limit) {
     const wait = windowMs - (now - arr[0]);
-    logger.info({ store_id, wait }, 'rate-limit wait');
+    logger.info({ owner_id, wait }, 'rate-limit wait');
     await sleep(wait + 50);
   }
   arr.push(Date.now());
-  sentTimestamps.set(store_id, arr);
+  sentTimestamps.set(owner_id, arr);
 }
 
 async function sendViaSocket(
@@ -92,18 +80,19 @@ export async function startSender(
     'send:message',
     { teamSize: 1, teamConcurrency: 1 },
     async (job) => {
-      const { store_id, to, text, media_url, message_id, request_id } = job.data;
-      if (!store_id || !to) return;
+      const { owner_id, store_id, to, text, media_url, message_id, request_id } = job.data;
+      const oid = owner_id || store_id; // legacy fallback
+      if (!oid || !to) return;
 
-      const sock = getSocket(store_id);
+      const sock = getSocket(oid);
       if (!sock) {
-        logger.warn({ store_id, to, rid: request_id }, 'no active session for store');
+        logger.warn({ owner_id: oid, to, rid: request_id }, 'no active session');
         await boss.publish('send:message', job.data as any, { startAfter: 5000 });
         return;
       }
 
       try {
-        await ensureRate(pool, store_id, logger);
+        await ensureRate(pool, oid, logger);
         await sendViaSocket(sock, to, text || undefined, media_url || undefined, logger);
 
         if (message_id) {
@@ -112,7 +101,7 @@ export async function startSender(
         logger.info({ to, rid: request_id }, 'sent ok');
         return true;
       } catch (e: any) {
-        logger.error({ err: e, to, rid: request_id }, 'send failed');
+  logger.error({ err: e, to, rid: request_id }, 'send failed');
         await boss.publish('send:message', job.data as any, { retryLimit: 3, retryDelay: 5000 });
         if (message_id) {
           await pool.query(`update messages set status='failed' where id=$1`, [message_id]);

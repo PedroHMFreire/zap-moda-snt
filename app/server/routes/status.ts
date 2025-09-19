@@ -1,6 +1,6 @@
 // app/api/sessions/status/index.ts
 import { Pool } from 'pg';
-import { getUserFromAuthHeader, assertStoreOwnership } from '../../lib/auth';
+import { getUserFromAuthHeader } from '../../lib/auth';
 
 let pool: Pool | null = null;
 function db() {
@@ -22,7 +22,7 @@ export default async function handler(req: any, res: any) {
     const user = await getUserFromAuthHeader(req);
     if (!user) return res.status(401).json({ error: 'unauthorized' });
     const r = await p.query(
-      `select id, store_id, status, last_qr, connected_at, updated_at
+      `select id, owner_id, status, last_qr, connected_at, updated_at
          from whatsapp_sessions
         where id = $1
         limit 1`,
@@ -30,11 +30,11 @@ export default async function handler(req: any, res: any) {
     );
     if (r.rowCount === 0) return res.status(404).json({ error: 'Sessão não encontrada' });
     const s = r.rows[0];
-    try { await assertStoreOwnership(user.id, s.store_id); } catch { return res.status(403).json({ error: 'forbidden' }); }
+    if (s.owner_id !== user.id) return res.status(403).json({ error: 'forbidden' });
 
     return res.status(200).json({
       session_id: s.id,
-      store_id: s.store_id,
+  owner_id: s.owner_id,
       status: s.status || 'pending',
       last_qr: s.last_qr || null,
       connected_at: s.connected_at,

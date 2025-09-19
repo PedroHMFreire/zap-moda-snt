@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express'
 import crypto from 'crypto'
-import { supabaseServer, supabaseService } from './supabaseClient'
+import { supabaseServer } from './supabaseClient'
 
 // Basic cache (in-memory) to reduce repeated getUser calls in burst traffic
 const userCache = new Map<string, { user: any; exp: number }>()
@@ -57,16 +57,6 @@ export async function getUserFromAuthHeader(req: any): Promise<any | null> {
   }
 }
 
-export async function assertStoreOwnership(userId: string, storeId: string) {
-  const sb = supabaseService()
-  const { data, error } = await sb
-    .from('stores')
-    .select('id')
-    .eq('id', storeId)
-    .eq('owner_id', userId)
-    .maybeSingle()
-  if (error || !data) throw new Error('forbidden')
-}
 
 export function verifyInternalSignature(req: Request): boolean {
   const token = process.env.INTERNAL_WEBHOOK_TOKEN

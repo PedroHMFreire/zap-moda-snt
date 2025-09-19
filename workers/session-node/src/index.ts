@@ -25,11 +25,11 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-type Session = { sessionId: string; storeId: string; sock: WASocket; authDir: string };
-const sessions = new Map<string, Session>(); // chave: storeId
+type Session = { sessionId: string; ownerId: string; sock: WASocket; authDir: string };
+const sessions = new Map<string, Session>(); // chave: ownerId
 
-export function getSocket(storeId: string): WASocket | null {
-  return sessions.get(storeId)?.sock || null;
+export function getSocket(ownerId: string): WASocket | null {
+  return sessions.get(ownerId)?.sock || null;
 }
 
 async function dbQuery<T = any>(sql: string, params?: any[]): Promise<T[]> {
@@ -69,17 +69,17 @@ function jidToPhone(jid: string): string {
   return (jid || '').split('@')[0];
 }
 
-async function startSession(storeId: string, sessionId: string) {
-  if (sessions.has(storeId)) {
-    logger.info({ storeId }, 'session already running');
+async function startSession(ownerId: string, sessionId: string) {
+  if (sessions.has(ownerId)) {
+    logger.info({ ownerId }, 'session already running');
     return;
   }
   if (sessions.size >= MAX) {
-    logger.warn({ storeId }, 'max sessions reached');
+    logger.warn({ ownerId }, 'max sessions reached');
     return;
   }
 
-  logger.info({ storeId, sessionId }, 'starting session');
+  logger.info({ ownerId, sessionId }, 'starting session');
 
   const authDir = ensureLocalAuthDir(sessionId);
   await downloadAuthDirFromStorage(sessionId, authDir).catch(() => {});
@@ -104,21 +104,21 @@ async function startSession(storeId: string, sessionId: string) {
     }
 
     if (connection === 'open') {
-      sessions.set(storeId, { storeId, sessionId, sock, authDir });
+      sessions.set(ownerId, { ownerId, sessionId, sock, authDir });
       await setConnected(sessionId);
-      logger.info({ storeId }, 'connected');
+      logger.info({ ownerId }, 'connected');
     }
 
     if (connection === 'close') {
       const code = (lastDisconnect?.error as any)?.output?.statusCode || (lastDisconnect?.error as any)?.code;
-      logger.warn({ storeId, code }, 'connection closed');
+  logger.warn({ ownerId, code }, 'connection closed');
 
       if (code === DisconnectReason.loggedOut || code === 401) {
         await setFailed(sessionId);
       } else {
         await setDisconnected(sessionId);
       }
-      sessions.delete(storeId);
+      sessions.delete(ownerId);
     }
   });
 
@@ -145,7 +145,7 @@ async function startSession(storeId: string, sessionId: string) {
       const hasMedia = !!(msg.message?.imageMessage || msg.message?.videoMessage || msg.message?.documentMessage);
 
       await postInbound({
-        store_id: storeId,
+        owner_id: ownerId,
         from,
         name: null,
         type: hasMedia ? 'media' : 'text',
@@ -159,14 +159,14 @@ async function startSession(storeId: string, sessionId: string) {
   });
 }
 
-async function stopSession(storeId: string, sessionId?: string) {
-  const s = sessions.get(storeId);
-  if (!s) { logger.info({ storeId }, 'no active session to stop'); return; }
+async function stopSession(ownerId: string, sessionId?: string) {
+  const s = sessions.get(ownerId);
+  if (!s) { logger.info({ ownerId }, 'no active session to stop'); return; }
   try {
     await s.sock.logout().catch(() => {});
     await setDisconnected(sessionId || s.sessionId);
-    sessions.delete(storeId);
-    logger.info({ storeId, sessionId: sessionId || s.sessionId }, 'stopped');
+    sessions.delete(ownerId);
+    logger.info({ ownerId, sessionId: sessionId || s.sessionId }, 'stopped');
   } catch (e) {
     logger.warn({ err: e }, 'stopSession failed');
   }
@@ -175,7 +175,7 @@ async function stopSession(storeId: string, sessionId?: string) {
 // ---------- Queue (PgBoss) ----------
 let boss: PgBoss | null = null;
 
-type SessionJob = { store_id: string; session_id: string };
+type SessionJob = { owner_id?: string; store_id?: string; session_id: string };
 
 async function startQueue() {
   boss = new PgBoss({
@@ -189,15 +189,17 @@ async function startQueue() {
   logger.info('pg-boss started');
 
   await boss.work<SessionJob>('session:start', async (job) => {
-    const { store_id, session_id } = job.data;
-    if (!store_id || !session_id) return;
-    await startSession(store_id, session_id);
+    const { owner_id, store_id, session_id } = job.data;
+    const oid = owner_id || store_id;
+    if (!oid || !session_id) return;
+    await startSession(oid, session_id);
   });
 
   await boss.work<SessionJob>('session:stop', async (job) => {
-    const { store_id, session_id } = job.data;
-    if (!store_id) return;
-    await stopSession(store_id, session_id);
+    const { owner_id, store_id, session_id } = job.data;
+    const oid = owner_id || store_id;
+    if (!oid) return;
+    await stopSession(oid, session_id);
   });
 
   const { startSender } = await import('./sender');

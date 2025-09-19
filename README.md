@@ -58,20 +58,21 @@ npm --prefix app run dev
 - Vercel: faça import do repositório e configure as envs acima. As rotas serverless estão em `app/api/**/index.ts`.
 - Workers: construa a imagem usando o `workers/Dockerfile` em seu provedor (Railway/Render). Configure as envs.
 
-6) Fluxos
-- Conectar WhatsApp: POST /api/sessions/create { store_id } → retorna session_id e QR (quando worker enviar `last_qr`). GET /api/sessions/status?session_id=...
+6) Fluxos (Modelo Atual: User = Workspace)
+- Conectar WhatsApp: POST /api/sessions/create → retorna `session_id` e (se disponível) `qr`.
+- Status da sessão: GET /api/sessions/status?session_id=...
 - Mensagem recebida: Worker POST /api/inbound com assinatura em `x-inbound-signature`.
 - IA: API POST /api/ai/reply (interno), que busca contexto e enfileira /api/send.
 - Envio: POST /api/send → pg-boss → Worker envia via Baileys.
 
 7) UI mínima
-Abra `https://seu-dominio.vercel.app/` para acessar o painel de operador e `config.html` para configurações.
+Abra `https://seu-dominio.vercel.app/` (`index.html`) para o painel de operador. `config.html` permite definir SUPABASE_URL / ANON e API_BASE localmente (sem STORE_ID).
 
 8) Testes rápidos (smoke)
-- API ok: GET `/api/health` deve retornar `{ ok: true }`.
-- Sessão/QR: POST `/api/sessions/create { store_id }` → abra a UI e confira QR pelo SSE.
-- Envio: selecione conversa na UI e envie mensagem; verifique `messages.status` indo de `queued` → `sent`.
-- Inbound: responda no WhatsApp e veja a mensagem chegar na UI e tabela `messages` (direction=in).
+- API ok: GET `/api/health` → `{ ok: true }`.
+- Sessão/QR: POST `/api/sessions/create` (autenticado) → conferir QR.
+- Envio: POST `/api/send` com `{ to, text }` autenticado → mensagem enfileirada.
+- Inbound: responder no WhatsApp e verificar chegada via UI / tabela `messages`.
 
 9) Métricas da Fila
 - Endpoint interno protegido: `GET /api/queue/metrics`
@@ -91,24 +92,46 @@ Abra `https://seu-dominio.vercel.app/` para acessar o painel de operador e `conf
 - Use para dashboards ou checks de liveness de backlog.
 
 ## Observações
-- Este MVP está pronto para evoluir com Baileys real nos workers (não usa Chromium).
-- A RLS restringe dados por `store_id` do `owner_id` (auth.uid()).
-- Evite expor `SUPABASE_SERVICE_ROLE` no front.
+## Observações
+ - MVP pronto para evoluir com Baileys real nos workers (não usa Chromium).
+ - MODELO DE TENANCY SIMPLIFICADO: cada usuário Supabase (auth.uid()) = 1 workspace. Colunas agora usam `owner_id` diretamente (não há mais tabela `stores`).
+ - RLS: políticas filham `owner_id = auth.uid()`.
+ - Evite expor `SUPABASE_SERVICE_ROLE` no front.
+
+### Migração (multi-store → user=workspace)
+Principais mudanças:
+1. Removidas `stores` e `whatsapp_configs`.
+2. Campos `store_id` substituídos por `owner_id` direto.
+3. Rotas não exigem mais `store_id`.
+4. Frontend remove referência a STORE_ID no localStorage.
+5. Rate limiting agora chaveia por `owner_id`.
+6. Função `assertStoreOwnership` removida.
+
+Para migrar dados antigos manualmente: renomeie colunas `store_id -> owner_id`, atribua o antigo owner para cada registro, drope tabelas obsoletas e recrie políticas RLS conforme nova migração.
 
 ## Migrações Futuras
-Para aplicar migrações incrementais (ex.: constraints e índices adicionais):
+## Rate Limiting
+Implementado para mitigar abuso e custos:
 
-1. Abra o SQL Editor do Supabase.
-2. Copie o conteúdo do arquivo em `migrations/20250917_constraints_indexes.sql`.
-3. Rode o script. Ele é idempotente (usa `if not exists` e recriações seguras).
+- Tabela: `application_rate_limits` (janela fixa). Ver migração `20250917_rate_limit.sql`.
+- Envio de mensagens (`POST /api/send`): limitado por usuário (`owner_id`) por minuto (default 20 – futuro: parametrizável por env).
+- Criação de sessão (`POST /api/sessions/create`): 5 tentativas por hora por usuário. Resposta 429 inclui `retry_at`.
+- Erro 503 (`rate_limit_unavailable`) se backend falhar.
+- Limpeza: `delete from application_rate_limits where window_end < now() - interval '1 day';`
+
+Extensões futuras:
+- Chaves separadas por IP + owner.
+- Sliding window mais preciso (duas janelas) se necessário.
+- Métricas integradas (bloqueios) em `/api/queue/metrics`.
 4. Valide novas constraints executando selects simples (ex.: verificar índices em `pg_indexes`).
-
-Em novos ambientes, basta rodar primeiro `supabase_schema.sql` e depois as migrações incrementais em ordem cronológica.
-
+Locais onde o cache foi aplicado:
+1. (Removido) config de rate limit por store – agora limite fixo por owner em memória.
+2. Busca de produtos (`searchProducts`) → chave `(owner_id, query, limit)`.
 ## Criptografia de Credenciais de Sessão
-Os arquivos de autenticação Baileys (multi-file) agora podem ser criptografados em repouso no Storage.
-
-- Variável: `SESSION_ENCRYPTION_KEY` (32 bytes em base64 ou 64 hex chars).
+Extensões futuras:
+- Classificador de intenção (suporte vs vendas).
+- Cache semântico de produtos.
+- Limite diário de tokens por usuário.
 - Algoritmo: AES-256-GCM (formato `ENCv1:<iv>:<cipher>:<tag>`).
 - Backward compatibility: se a key não estiver definida ou inválida, os arquivos continuam em texto simples e um aviso é logado apenas uma vez.
 

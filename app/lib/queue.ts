@@ -27,20 +27,29 @@ async function getBoss(): Promise<PgBoss> {
   return bossReady;
 }
 
-export type JobPayload = Record<string, unknown>;
+export type JobPayload = { [key: string]: any }; // flexibilizado para aceitar payload híbrido legacy
 
 export async function publishJob(name: string, data: JobPayload) {
   const b = await getBoss();
   return b.publish(name, data as object);
 }
 
-export const enqueueSendMessage = (p: {
-  store_id: string; to: string; text?: string; media_url?: string;
-  conversation_id?: string; contact_id?: string; message_id?: string;
-}) => publishJob('send:message', p);
+// Novo modelo: owner_id substitui store_id. Mantemos aceitação de store_id para jobs legados.
+interface SendMessageJobLegacy {
+  store_id?: string;
+  owner_id?: string;
+  to: string;
+  text?: string;
+  media_url?: string;
+  conversation_id?: string;
+  contact_id?: string;
+  message_id?: string;
+}
 
-export const notifySessionStart = (p: { store_id: string; session_id: string }) =>
+export const enqueueSendMessage = (p: SendMessageJobLegacy) => publishJob('send:message', p);
+
+export const notifySessionStart = (p: { owner_id?: string; store_id?: string; session_id: string }) =>
   publishJob('session:start', p);
 
-export const notifySessionStop = (p: { store_id: string; session_id: string }) =>
+export const notifySessionStop = (p: { owner_id?: string; store_id?: string; session_id: string }) =>
   publishJob('session:stop', p);
